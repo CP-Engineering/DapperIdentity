@@ -39,16 +39,11 @@ public static class DapperIdentityCookieServiceCollectionExtensions
     }
 
 
-    /// <summary>
-    /// Adds the Basic Auth Controller
-    /// </summary>
-    /// <param name="services"></param>
-    /// <returns></returns>
-    public static IServiceCollection AddBasicAuthController(this IServiceCollection services)
-    {
-        services.TryAddDapperIdentityDatabaseStores();
-        return services;
-    }
+    // AddBasicAuthController removed 2026-09-16 along with the Basic and Digest auth experiments.
+    // It never registered a controller - it only called TryAddDapperIdentityDatabaseStores() - so
+    // its name promised something it did not do, and the controller it named was unfinished
+    // scaffolding routed into consumers by AddIdentityControllers rather than by this method.
+    // The last commit containing that work is tagged learning/basic-digest-auth.
 
     /// <summary>
     /// Add Dapper Identity - No UI
