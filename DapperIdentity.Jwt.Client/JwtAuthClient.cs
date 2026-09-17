@@ -7,8 +7,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using Blazored.LocalStorage;
-using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.Extensions.Logging;
 
 namespace CPE.DapperIdentity.Jwt.Client
 {
@@ -19,8 +18,18 @@ namespace CPE.DapperIdentity.Jwt.Client
 
         public Uri Endpoint { get; set; }
 
-        public JwtAuthClient(IConfiguration configuration)
+        private readonly ILogger<JwtAuthClient>? _logger;
+
+        /// <param name="configuration">
+        /// Must contain an <c>AuthServer:Endpoint</c> value; the constructor throws without it.
+        /// </param>
+        /// <param name="logger">
+        /// Optional so this stays constructible without a logging stack. The DI container supplies
+        /// one in any host that has logging registered, which is every ASP.NET Core and Blazor app.
+        /// </param>
+        public JwtAuthClient(IConfiguration configuration, ILogger<JwtAuthClient>? logger = null)
         {
+            _logger = logger;
             var authSection = configuration.GetSection(AuthServerSectionName);
             if (!authSection.Exists()) throw new Exception($"Configuration/AppSettings does not contain section: {AuthServerSectionName}.");
 
@@ -128,16 +137,21 @@ namespace CPE.DapperIdentity.Jwt.Client
                 //var authResult = await client.PostAsync("api/jwtauth/login", bodyContent);
                 try
                 {
-                    var authResult = await client.SendAsync(req);
-                    //var authContent = await authResult.Content.ReadAsStringAsync();
-                    if (!authResult.IsSuccessStatusCode)
-                        return true; //ToDo: Change Return Type
-                    else return true;
-                    //we always return true
+                    // Deliberately true whichever status comes back, and not a ToDo. The server's
+                    // ForgotPassword returns 200 for an unknown or unconfirmed email precisely so
+                    // the endpoint cannot be used to discover which accounts exist
+                    // (JwtAuthController.ForgotPassword). A client that reported "no such user"
+                    // would hand back the very distinction the server refuses to make.
+                    //
+                    // false therefore means one thing only: the request never completed.
+                    await client.SendAsync(req);
+                    return true;
                 }
-
                 catch (Exception ex)
                 {
+                    // Was swallowed silently. The caller only learns that something failed, so
+                    // without this the reason - DNS, TLS, timeout, wrong endpoint - was lost.
+                    _logger?.LogWarning(ex, "ForgotPassword request to {Endpoint} did not complete.", Endpoint);
                     return false;
                 }
 

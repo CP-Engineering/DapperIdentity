@@ -22,9 +22,12 @@ public class RegistrationRequest
     [Required]
     public string? Password { get; set; }
 
-    public string FirstName { get; set; }
+    // Nullable, and deliberately without [Required]: the three properties above carry the attribute
+    // explicitly, so the author's intent is that these two are optional. They were non-nullable,
+    // which made model binding require them implicitly - the opposite of that intent.
+    public string? FirstName { get; set; }
 
-    public string LastName { get; set; }
+    public string? LastName { get; set; }
 
     /// <summary>
     /// User's Id. If none is supplied, one will be created and returned
