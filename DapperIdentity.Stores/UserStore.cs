@@ -370,17 +370,40 @@ namespace CPE.DapperIdentity.Stores
             throw new NotImplementedException();
         }
 
+        /// <summary>
+        /// Deletes the named claims from the user, matching on type and value.
+        /// </summary>
+        /// <remarks>
+        /// Implemented 2026-09-17. Until then the body built the statement and its parameters and
+        /// then returned without executing anything, so removing a claim reported success and
+        /// changed nothing. The half-written parameters were also wrong: @claimValue was never
+        /// supplied and @claimType was bound to the whole claim collection rather than a type.
+        ///
+        /// One execution per claim, via Dapper's multi-exec: the statement matches a single
+        /// claim, and the method takes a collection. Matching on UserId as well as type and value
+        /// is what stops one user's removal touching another user's identical claim.
+        /// </remarks>
         public async Task RemoveClaimsAsync(CustomIdentityUser user, IEnumerable<Claim> claims, CancellationToken cancellationToken)
         {
-            var sql = @"DELETE FROM IdentityUserClaim where ClaimType = @claimType AND ClaimValue=@claimValue and UserId = @userId";
+            cancellationToken.ThrowIfCancellationRequested();
 
-            var dynamicParams = new DynamicParameters();
-            dynamicParams.Add("@userId", user.Id);
-            dynamicParams.Add("@claimType", claims);
-            //using (var conn = MyRepository.DbConnection)
-            //{
-            //}
+            var parameters = claims.Select(claim => new
+            {
+                userId = user.Id,
+                claimType = claim.Type,
+                claimValue = claim.Value
+            }).ToArray();
 
+            // Dapper treats an empty collection as nothing to do, but being explicit keeps a
+            // needless connection from being opened.
+            if (parameters.Length == 0) return;
+
+            var sql = @"DELETE FROM IdentityUserClaim WHERE UserId = @userId AND ClaimType = @claimType AND ClaimValue = @claimValue";
+
+            using (var connection = _IdentityUserClaimRepository.DbConnection)
+            {
+                await connection.ExecuteAsync(sql, parameters);
+            }
         }
 
         public Task<IList<CustomIdentityUser>> GetUsersForClaimAsync(Claim claim, CancellationToken cancellationToken)

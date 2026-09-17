@@ -1,22 +1,42 @@
-﻿CREATE TABLE "IdentityUser" (
+-- Schema for CPE.DapperIdentity.Stores, SQLite dialect.
+--
+-- Column sets come from the models, which are the source of truth: Dapper.Contrib maps every public
+-- property except those marked [Write(false)]. Corrected 2026-09-16 - this script was missing
+-- IdentityUser.IsEnabled, RefreshToken and RefreshTokenExpireTime, IdentityRole.Description, and the
+-- IdentityUserClaim table in its entirety, which UserStore reads and writes in GetClaimsAsync,
+-- AddClaimsAsync and RemoveClaimsAsync.
+
+CREATE TABLE "IdentityUser" (
 	"Id"	TEXT NOT NULL UNIQUE,
 	"UserName"	TEXT,
+	"NormalizedUserName"	TEXT,
 	"Email"	TEXT,
 	"NormalizedEmail"	TEXT,
-	"NormalizedUserName"	TEXT,
-	"PasswordHash"	TEXT,
 	"EmailConfirmed"	INT,
+	"PasswordHash"	TEXT,
 	"PhoneNumber"	TEXT,
 	"PhoneNumberConfirmed"	INT,
 	"TwoFactorEnabled"	INT,
 	"FirstName"	TEXT,
 	"LastName"	TEXT,
-	"SecurityStamp" TEXT,
+	"SecurityStamp"	TEXT,
+	"IsEnabled"	INT,
+	"RefreshToken"	TEXT,
+	"RefreshTokenExpireTime"	TEXT,
 	PRIMARY KEY("Id")
 );
 
 CREATE TABLE "IdentityRole" (
 	"Id"	TEXT NOT NULL,
 	"Name"	TEXT NOT NULL,
+	"Description"	TEXT,
+	PRIMARY KEY("Id")
+);
+
+CREATE TABLE "IdentityUserClaim" (
+	"Id"	TEXT NOT NULL,
+	"UserId"	TEXT,
+	"ClaimType"	TEXT,
+	"ClaimValue"	TEXT,
 	PRIMARY KEY("Id")
 );

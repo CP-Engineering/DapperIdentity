@@ -20,3 +20,38 @@ CREATE TABLE `identityuser` (
 COLLATE='utf8mb3_general_ci'
 ENGINE=InnoDB
 ;
+
+-- Added 2026-09-16. This script previously created `identityuser` and nothing else, so a consumer
+-- who followed it got a database where every role and every claim operation failed at runtime:
+-- RoleStore needs `identityrole`, and UserStore reads and writes `identityuserclaim` in
+-- GetClaimsAsync, AddClaimsAsync and RemoveClaimsAsync.
+--
+-- Column sets come from the models, which are the source of truth - Dapper.Contrib maps every
+-- public property except those marked [Write(false)]. Nullability and collation follow the existing
+-- `identityuser` definition above so the three tables look like one schema.
+--
+-- NOTE on `identityuser` above, deliberately NOT changed here: `ID` is declared NULL with no PRIMARY
+-- KEY. The model marks it [ExplicitKey], so the application treats it as the key while the database
+-- does not enforce it. Correcting that means altering a table that already exists in production, so
+-- it is a migration decision rather than a script edit.
+
+CREATE TABLE `identityrole` (
+	`Id` VARCHAR(50) NOT NULL COLLATE 'utf8mb3_general_ci',
+	`Name` VARCHAR(256) NOT NULL COLLATE 'utf8mb3_general_ci',
+	`Description` VARCHAR(256) NULL DEFAULT NULL COLLATE 'utf8mb3_general_ci',
+	PRIMARY KEY (`Id`)
+)
+COLLATE='utf8mb3_general_ci'
+ENGINE=InnoDB
+;
+
+CREATE TABLE `identityuserclaim` (
+	`Id` VARCHAR(50) NOT NULL COLLATE 'utf8mb3_general_ci',
+	`UserId` VARCHAR(50) NULL DEFAULT NULL COLLATE 'utf8mb3_general_ci',
+	`ClaimType` VARCHAR(256) NULL DEFAULT NULL COLLATE 'utf8mb3_general_ci',
+	`ClaimValue` VARCHAR(256) NULL DEFAULT NULL COLLATE 'utf8mb3_general_ci',
+	PRIMARY KEY (`Id`)
+)
+COLLATE='utf8mb3_general_ci'
+ENGINE=InnoDB
+;
