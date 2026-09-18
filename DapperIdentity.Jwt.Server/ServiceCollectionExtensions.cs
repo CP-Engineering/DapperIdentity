@@ -62,7 +62,7 @@ public static class ServiceCollectionExtensions
     {
         // Validated here rather than where it is used, so a deployment that forgot the setting
         // fails at startup instead of discovering it when a user cannot reset their password.
-        services.AddSingleton(ReadAppBaseUrl(configuration));
+        services.AddSingleton(AppBaseUrl.FromConfiguration(configuration));
         services.AddSingleton(new PasswordResetRateLimiter());
 
         services.TryAddDapperIdentityDatabaseStores();
@@ -125,41 +125,6 @@ public static class ServiceCollectionExtensions
 
 
         return services;
-    }
-
-    /// <summary>
-    /// Reads and validates the application's public base address from configuration.
-    /// </summary>
-    /// <remarks>
-    /// Required, with no fallback on purpose. The obvious fallback would be the incoming request,
-    /// which is exactly what this setting exists to stop the library trusting - so a deployment
-    /// that has not set it must fail loudly rather than quietly go back to the unsafe behaviour.
-    /// </remarks>
-    /// <param name="configuration">The application's configuration.</param>
-    /// <returns>The validated base address.</returns>
-    /// <exception cref="InvalidOperationException">The setting is missing or unusable.</exception>
-    private static AppBaseUrl ReadAppBaseUrl(IConfiguration configuration)
-    {
-        const string key = "DapperIdentity:AppBaseUrl";
-        var configured = configuration[key];
-
-        if (string.IsNullOrWhiteSpace(configured))
-        {
-            throw new InvalidOperationException(
-                $"Configuration is missing '{key}'. Set it to this application's own public " +
-                "address, for example \"https://app.example.com\". It is used to build the " +
-                "password-reset link that is emailed to users, and has no safe default.");
-        }
-
-        if (!Uri.TryCreate(configured, UriKind.Absolute, out var parsed) ||
-            (parsed.Scheme != Uri.UriSchemeHttps && parsed.Scheme != Uri.UriSchemeHttp))
-        {
-            throw new InvalidOperationException(
-                $"Configuration value '{key}' is '{configured}', which is not an absolute http " +
-                "or https URL. A relative value produces an unusable link in an email.");
-        }
-
-        return new AppBaseUrl(parsed);
     }
 
     /// <summary>

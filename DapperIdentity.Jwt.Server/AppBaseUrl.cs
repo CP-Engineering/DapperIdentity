@@ -1,4 +1,5 @@
 using System;
+using Microsoft.Extensions.Configuration;
 
 namespace CPE.DapperIdentity.Jwt.Server;
 
@@ -53,4 +54,48 @@ public sealed class AppBaseUrl
     /// </param>
     /// <returns>The absolute URL.</returns>
     public Uri PathTo(string relativePath) => new Uri(Value, relativePath);
+
+    /// <summary>The configuration key this is read from.</summary>
+    public const string ConfigurationKey = "DapperIdentity:AppBaseUrl";
+
+    /// <summary>
+    /// Reads and validates the base address from configuration.
+    /// </summary>
+    /// <remarks>
+    /// Required, with no fallback on purpose. The obvious fallback would be the incoming request,
+    /// which is exactly what this type exists to stop the library trusting - so a deployment that
+    /// has not set it must fail loudly rather than quietly return to the unsafe behaviour.
+    /// <c>AddJwtIdentity</c> calls this during registration so the failure lands at startup, not
+    /// at the moment a user needs a reset link.
+    /// </remarks>
+    /// <param name="configuration">The application's configuration.</param>
+    /// <returns>The validated base address.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="configuration"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The value is absent, blank, or not an absolute http/https URL.
+    /// </exception>
+    public static AppBaseUrl FromConfiguration(IConfiguration configuration)
+    {
+        if (configuration is null) throw new ArgumentNullException(nameof(configuration));
+
+        var configured = configuration[ConfigurationKey];
+
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            throw new InvalidOperationException(
+                $"Configuration is missing '{ConfigurationKey}'. Set it to this application's own " +
+                "public address, for example \"https://app.example.com\". It is used to build the " +
+                "password-reset link that is emailed to users, and has no safe default.");
+        }
+
+        if (!Uri.TryCreate(configured, UriKind.Absolute, out var parsed) ||
+            (parsed.Scheme != Uri.UriSchemeHttps && parsed.Scheme != Uri.UriSchemeHttp))
+        {
+            throw new InvalidOperationException(
+                $"Configuration value '{ConfigurationKey}' is '{configured}', which is not an " +
+                "absolute http or https URL. A relative value produces an unusable link in an email.");
+        }
+
+        return new AppBaseUrl(parsed);
+    }
 }
