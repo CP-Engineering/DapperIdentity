@@ -31,7 +31,7 @@ namespace CPE.DapperIdentity.Stores
         /// </summary>
         /// <param name="user">The user</param>
         /// <returns>Null if the user should be allowed to sign in, otherwise the SignInResult why they should be denied.</returns>
-        protected override async Task<SignInResult> PreSignInCheck(IdentityUser user)
+        protected override async Task<SignInResult?> PreSignInCheck(IdentityUser user)
         {
             if (!await CanSignInAsync(user))
             {
