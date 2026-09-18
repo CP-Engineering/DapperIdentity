@@ -14,6 +14,12 @@ namespace CPE.DapperIdentity.Jwt.Client;
 /// </remarks>
 public sealed class AuthResult
 {
+    /// <summary>
+    /// Private so the two states cannot be mixed: use <see cref="Success"/> or
+    /// <see cref="Failed"/>, which each guarantee one of them.
+    /// </summary>
+    /// <param name="tokens">The tokens, or null for a failure.</param>
+    /// <param name="failure">The failure reason, or None for a success.</param>
     private AuthResult(AuthTokens? tokens, AuthFailure failure)
     {
         Tokens = tokens;

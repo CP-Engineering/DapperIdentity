@@ -13,6 +13,14 @@ using IdentityRole = CPE.DapperIdentity.Stores.Models.CustomIdentityRole;
 using IdentityUser = CPE.DapperIdentity.Stores.Models.CustomIdentityUser;
 
 namespace Microsoft.Extensions.DependencyInjection;
+
+/// <summary>
+/// Registration entry points for the cookie-authentication server package.
+/// </summary>
+/// <remarks>
+/// Sits in <c>Microsoft.Extensions.DependencyInjection</c> so these are reachable from a
+/// consumer's <c>Program.cs</c> without a using directive.
+/// </remarks>
 public static class DapperIdentityCookieServiceCollectionExtensions
 {
 
@@ -113,10 +121,13 @@ public static class DapperIdentityCookieServiceCollectionExtensions
     /// <summary>
     /// Adds vanilla Identity. Assumes you have scaffolded or are using Identity UI/Razor Pages Area
     /// </summary>
-    /// <param name="services"></param>
-    /// <param name="requireConfirmedEmail"></param>
-    /// <param name="slidingExpiration"></param>
-    /// <returns></returns>
+    /// <typeparam name="T">The ADO.NET connection type the repositories should open.</typeparam>
+    /// <param name="services">The service collection to add to.</param>
+    /// <param name="connectionString">Connection string the repositories open <typeparamref name="T"/> with.</param>
+    /// <param name="requireConfirmedEmail">Whether sign-in requires a confirmed email address.</param>
+    /// <param name="slidingExpiration">Whether the auth cookie's lifetime renews on activity.</param>
+    /// <returns>The same collection, for chaining.</returns>
+    /// <remarks>The cookie lifetime is fixed at seven days by this overload.</remarks>
     public static IServiceCollection AddDapperIdentityWithVanillaUIAndDefaults<T>(this IServiceCollection services,
                                                             string connectionString,
                                                             bool requireConfirmedEmail = true,

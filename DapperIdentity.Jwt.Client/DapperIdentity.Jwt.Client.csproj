@@ -5,7 +5,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <NoWarn>$(NoWarn);CS1591</NoWarn>
     <!-- The namespaces carry the CPE. prefix (D-051) while the project file does not, so
          RootNamespace has to be stated - otherwise it defaults to the project name and every new
          file lands in the old namespace. -->

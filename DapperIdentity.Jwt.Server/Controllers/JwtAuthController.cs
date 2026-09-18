@@ -21,6 +21,13 @@ using ResetPasswordRequest = CPE.DapperIdentity.Abstractions.Models.ResetPasswor
 //https://www.c-sharpcorner.com/article/jwt-authentication-with-refresh-tokens-in-net-6-0/
 namespace CPE.DapperIdentity.Jwt.Server.Controllers;
 
+/// <summary>
+/// The JWT authentication endpoints: register, login, refresh, forgot password and reset.
+/// </summary>
+/// <remarks>
+/// Routed at <c>/api/jwtauth</c>. Registered by <c>AddJwtIdentity</c>, which routes this
+/// controller and no other from the assembly.
+/// </remarks>
 [ApiController]
 [Route("/api/[controller]")]
 //[Route("/[controller]/[action]")]
@@ -36,6 +43,14 @@ public class JwtAuthController : ControllerBase
 
     private readonly IAppSettings _AppSettings;
 
+    /// <summary>Captures the services the endpoints need.</summary>
+    /// <param name="userManager">Identity's user manager.</param>
+    /// <param name="tokenService">Issues access and refresh tokens.</param>
+    /// <param name="emailSender">Sends the registration and password-reset mails.</param>
+    /// <param name="logger">Logger for the endpoints.</param>
+    /// <param name="appSettings">
+    /// Supplies the application name used in email subjects and bodies.
+    /// </param>
     public JwtAuthController(UserManager<IdentityUser> userManager,
                              TokenService tokenService,
                              IAuthEmailSender emailSender,
@@ -50,6 +65,15 @@ public class JwtAuthController : ControllerBase
         _AppSettings = appSettings;
     }
 
+    /// <summary>
+    /// Creates an account, attaches any supplied claims, and emails a confirmation link.
+    /// </summary>
+    /// <remarks>
+    /// Requires an authenticated caller - this is an admin-style endpoint that creates accounts
+    /// for other people, not open self-registration.
+    /// </remarks>
+    /// <param name="request">The account to create.</param>
+    /// <returns>The created user on success, or the model-state errors on a bad request.</returns>
     [Authorize]
     [HttpPost]
     [Route("register")]
@@ -101,6 +125,19 @@ public class JwtAuthController : ControllerBase
         return BadRequest(ModelState);
     }
 
+    /// <summary>
+    /// Mints a password-reset token and emails the user a link to set their password.
+    /// </summary>
+    /// <remarks>
+    /// Shared by registration and forgot-password, which is why the wording is parameterised
+    /// rather than fixed. The link is built from the request's <c>Referer</c> header, so the
+    /// address a user receives depends on what the caller sent - a request with no Referer
+    /// produces a relative, unusable URL, and a forged one sends your reset token somewhere else.
+    /// A configured base URL would be the fix.
+    /// </remarks>
+    /// <param name="user">The account the reset link is for.</param>
+    /// <param name="subject">The email subject line.</param>
+    /// <param name="bodyPrefix">Text placed before "clicking here" in the body.</param>
     private async Task SendRegistrationEmail(IdentityUser user, string subject, string bodyPrefix)
     {
 
@@ -251,6 +288,19 @@ public class JwtAuthController : ControllerBase
         });
     }
 
+    /// <summary>
+    /// Exchanges an expired access token and its refresh token for a new pair.
+    /// </summary>
+    /// <remarks>
+    /// The access token is read with <c>GetPrincipalFromExpiredToken2</c>, which validates the
+    /// signature only - so the refresh token stored against the user, and its expiry, are what
+    /// actually gate this endpoint. A successful refresh rotates both tokens.
+    /// </remarks>
+    /// <param name="tokenDto">The expired access token and the refresh token issued with it.</param>
+    /// <returns>
+    /// A new token pair, or 400 when the access token is unreadable, the user is unknown, the
+    /// refresh token does not match, or it has expired. All four answer alike on purpose.
+    /// </returns>
     [AllowAnonymous]
     [HttpPost]
     [Route("refresh")]

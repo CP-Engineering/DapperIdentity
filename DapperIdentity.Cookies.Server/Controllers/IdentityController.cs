@@ -15,6 +15,14 @@ using IdentityUser = CPE.DapperIdentity.Stores.Models.CustomIdentityUser;
 
 namespace CPE.DapperIdentity.Cookies.Server.Controllers
 {
+    /// <summary>
+    /// Cookie-authentication endpoints: sign out, and confirm an email address.
+    /// </summary>
+    /// <remarks>
+    /// Routed at <c>/Identity/[action]</c>. For Blazor Server and other cookie-based hosts; the
+    /// JWT package has its own controller. <c>ConfirmEmail</c> redirects to Razor Pages, so a host
+    /// with no Razor Pages will get a routing failure rather than a page.
+    /// </remarks>
     [Route("/[controller]/[action]")]
     [ApiController]
     public class IdentityController : ControllerBase
@@ -23,6 +31,9 @@ namespace CPE.DapperIdentity.Cookies.Server.Controllers
         private readonly SignInManager<IdentityUser> _SignInManager;
         //private readonly ILogger<LoginModel> _logger;
 
+        /// <summary>Captures the Identity managers the endpoints need.</summary>
+        /// <param name="signInManager">Identity's sign-in manager.</param>
+        /// <param name="userManager">Identity's user manager.</param>
         public IdentityController(SignInManager<IdentityUser> signInManager,
                                 UserManager<IdentityUser> userManager)
         {
@@ -90,6 +101,13 @@ namespace CPE.DapperIdentity.Cookies.Server.Controllers
         }
 
         //Identity/Logout
+        /// <summary>Signs the current user out and redirects to the site root.</summary>
+        /// <remarks>
+        /// A GET with antiforgery ignored, so any page that can make the browser issue a request
+        /// to this URL can sign the user out. Harmless in itself, but it means an image tag on
+        /// another site can log your users out.
+        /// </remarks>
+        /// <returns>A redirect to <c>/</c>, whether or not anyone was signed in.</returns>
         [HttpGet]
         [IgnoreAntiforgeryToken]
         public async Task<ActionResult> Logout()
@@ -101,6 +119,15 @@ namespace CPE.DapperIdentity.Cookies.Server.Controllers
             return Redirect("/");
         }
         
+        /// <summary>Confirms a user's email address from the link sent to them.</summary>
+        /// <remarks>
+        /// The outcome is computed into a local status message that is then discarded, so the user
+        /// is redirected to the same place whether the confirmation succeeded or failed and has no
+        /// way to tell which happened.
+        /// </remarks>
+        /// <param name="userId">The user the link was issued for.</param>
+        /// <param name="code">The Base64Url-encoded confirmation token.</param>
+        /// <returns>A redirect, or 404 when no user matches <paramref name="userId"/>.</returns>
         [HttpGet]
         public async Task<ActionResult> ConfirmEmail(string userId, string code)
         {

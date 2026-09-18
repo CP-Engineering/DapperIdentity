@@ -15,6 +15,16 @@ using Microsoft.AspNetCore.Identity;
 //using System.IdentityModel.Tokens.Jwt; Used directly below
 
 namespace CPE.DapperIdentity.Jwt.Server;
+
+/// <summary>
+/// Issues the access and refresh tokens the JWT endpoints hand out, and reads the principal back
+/// out of an expired one.
+/// </summary>
+/// <remarks>
+/// Settings come from the <c>JwtTokenSettings</c> configuration section, which is required - the
+/// constructor throws if it is absent. Tokens are signed with HMAC-SHA256 using the symmetric key
+/// from that section, so every service that validates these tokens must hold the same key.
+/// </remarks>
 public class TokenService
 {
 
@@ -27,6 +37,18 @@ public class TokenService
     private IUserClaimStore<IdentityUser> _userClaimStore;
 
 
+    /// <summary>Reads the JWT settings from configuration and captures the claim sources.</summary>
+    /// <param name="logger">Logger for token creation and claim-building failures.</param>
+    /// <param name="configuration">
+    /// Must contain a <c>JwtTokenSettings</c> section; the constructor throws without it.
+    /// </param>
+    /// <param name="claimStore">
+    /// Store the per-user claims are read from when a token is built.
+    /// </param>
+    /// <param name="claimsService">
+    /// Optional hook for claims the consumer computes rather than stores. Omit it and only stored
+    /// claims and roles reach the token.
+    /// </param>
     public TokenService(ILogger<TokenService> logger,
                         IConfiguration configuration,
                         IUserClaimStore<IdentityUser> claimStore,
@@ -39,11 +61,17 @@ public class TokenService
     }
 
     /// <summary>
-    /// 
+    /// Builds and signs an access token for the user.
     /// </summary>
-    /// <param name="user"></param>
-    /// <param name="roles"></param>
-    /// <returns></returns>
+    /// <remarks>
+    /// The token carries the standard registered claims, one role claim per entry in
+    /// <paramref name="roles"/>, everything in the user's claim store, and anything the optional
+    /// <see cref="IClaimsService"/> contributes. It expires after the configured
+    /// <c>JwtExpireSeconds</c>.
+    /// </remarks>
+    /// <param name="user">The user the token is issued for.</param>
+    /// <param name="roles">Role names to write as role claims.</param>
+    /// <returns>The signed JWT.</returns>
     public async ValueTask<string> CreateToken(IdentityUser user, IEnumerable<string> roles)
     {
         var expiration = DateTime.UtcNow + _JwtSettings.ExpirationTime; //AddMinutes(ExpirationMinutes);
@@ -62,6 +90,19 @@ public class TokenService
 
 
 
+    /// <summary>
+    /// Assembles every claim that goes into an access token, from three sources.
+    /// </summary>
+    /// <remarks>
+    /// In order: the registered claims (sub, jti, iat, iss, aud) plus name, email and a duplicate
+    /// UserId claim; one role claim per entry in <paramref name="usersRoles"/>; whatever the
+    /// optional <see cref="IClaimsService"/> returns; and finally the user's stored claims. Both
+    /// optional sources are null-checked, so a host that registers neither still gets a usable
+    /// token. Nothing de-duplicates, so a stored claim that repeats a role appears twice.
+    /// </remarks>
+    /// <param name="user">The user the token is for.</param>
+    /// <param name="usersRoles">Role names to write as role claims.</param>
+    /// <returns>The assembled claims.</returns>
     private async ValueTask<List<Claim>> CreateClaims(IdentityUser user, IEnumerable<string> usersRoles)
     {
 
@@ -109,6 +150,12 @@ public class TokenService
         }
     }
 
+    /// <summary>Builds the HMAC-SHA256 credentials every token is signed with.</summary>
+    /// <remarks>
+    /// Symmetric, so the signing key and the validating key are the same secret. Any service that
+    /// holds it can mint tokens this application will accept.
+    /// </remarks>
+    /// <returns>Signing credentials over the configured symmetric key.</returns>
     private SigningCredentials CreateSigningCredentials()
     {
         var symmetricSecurityKey = _JwtSettings.SymmetricSecurityKey;
@@ -124,7 +171,11 @@ public class TokenService
     /// <summary>
     /// Generates a random token and new expiration date for the refresh token
     /// </summary>
-    /// <returns></returns>
+    /// <returns>
+    /// The refresh token (32 cryptographically random bytes, base64) and when it stops being
+    /// accepted, <c>RefreshTokenLifeDays</c> from now. Storing it against the user is the caller's
+    /// job; this method only mints it.
+    /// </returns>
     public (string token, DateTime expiration) GenerateRefreshToken()
     {
         var randomNumber = new byte[32];
@@ -135,6 +186,20 @@ public class TokenService
         }
     }
 
+    /// <summary>
+    /// Reads the principal out of a token whose lifetime has passed, validating the signature and
+    /// the issuer but not the expiry.
+    /// </summary>
+    /// <remarks>
+    /// Nothing in this library calls this. The refresh endpoint uses
+    /// <see cref="GetPrincipalFromExpiredToken2"/>, which is the same routine with issuer
+    /// validation turned off - so of the two, the stricter one is the unused one.
+    /// </remarks>
+    /// <param name="token">The expired access token.</param>
+    /// <returns>The principal the token describes.</returns>
+    /// <exception cref="SecurityTokenException">
+    /// The token is not a JWT, or is not signed with HMAC-SHA256.
+    /// </exception>
     public ClaimsPrincipal GetPrincipalFromExpiredToken(string token)
     {
         var tokenValidationParameters = new TokenValidationParameters
@@ -162,6 +227,19 @@ public class TokenService
         return principal;
     }
 
+    /// <summary>
+    /// Reads the principal out of an expired token, validating only the signature.
+    /// </summary>
+    /// <remarks>
+    /// This is what the refresh endpoint calls. Issuer, audience and lifetime are all left
+    /// unvalidated, so the only thing standing between a caller and a refreshed session is
+    /// possession of a token signed with this service's symmetric key.
+    /// </remarks>
+    /// <param name="token">The expired access token.</param>
+    /// <returns>The principal the token describes.</returns>
+    /// <exception cref="SecurityTokenException">
+    /// The token is not a JWT, or is not signed with HMAC-SHA256.
+    /// </exception>
     public ClaimsPrincipal GetPrincipalFromExpiredToken2(string? token)
     {
         var tokenValidationParameters = new TokenValidationParameters
@@ -182,18 +260,23 @@ public class TokenService
 
     }
     /// <summary>
-    /// Store JWT settings fron configuration
-    /*
-       "JwtTokenSettings": {
-    "ValidIssuer": "ExampleIssuer",
-    "ValidAudience": "ValidAudience",
-    "SymmetricSecurityKey": "fvh8456477hth44j6wfds98bq9hp8bqh9ubq9gjig3qr0[94vj5",
-    "JwtRegisteredClaimNamesSub": "345h098bb8reberbwr4vvb8945",
-    "JwtExpireSeconds": 900,
-    "RefreshTokenLifeDays": 4 
-    }
-    */
+    /// Typed reader over the required <c>JwtTokenSettings</c> configuration section.
     /// </summary>
+    /// <remarks>
+    /// The sample below was previously a block comment nested inside this summary, which is not
+    /// legal XML - it is why the file emitted CS1587 and two CS1570s. It is a code block now.
+    /// <code>
+    /// "JwtTokenSettings": {
+    ///   "ValidIssuer": "ExampleIssuer",
+    ///   "ValidAudience": "ValidAudience",
+    ///   "SymmetricSecurityKey": "&lt;a long random string, not this one&gt;",
+    ///   "JwtExpireSeconds": 900,
+    ///   "RefreshTokenLifeDays": 4
+    /// }
+    /// </code>
+    /// Every accessor uses the null-forgiving operator, so a missing key surfaces as a
+    /// NullReferenceException on first use rather than a named configuration error.
+    /// </remarks>
     private record JwtSettings
     {
 
