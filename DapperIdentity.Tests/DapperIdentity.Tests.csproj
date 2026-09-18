@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DapperIdentity.Stores\DapperIdentity.Stores.csproj" />
+    <ProjectReference Include="..\DapperIdentity.Jwt.Server\DapperIdentity.Jwt.Server.csproj" />
   </ItemGroup>
 
 </Project>

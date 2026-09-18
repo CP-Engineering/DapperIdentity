@@ -43,6 +43,10 @@ public class JwtAuthController : ControllerBase
 
     private readonly IAppSettings _AppSettings;
 
+    private readonly AppBaseUrl _AppBaseUrl;
+
+    private readonly PasswordResetRateLimiter _ResetRateLimiter;
+
     /// <summary>Captures the services the endpoints need.</summary>
     /// <param name="userManager">Identity's user manager.</param>
     /// <param name="tokenService">Issues access and refresh tokens.</param>
@@ -51,11 +55,15 @@ public class JwtAuthController : ControllerBase
     /// <param name="appSettings">
     /// Supplies the application name used in email subjects and bodies.
     /// </param>
+    /// <param name="appBaseUrl">The application's public address, used to build the reset link.</param>
+    /// <param name="resetRateLimiter">Caps reset attempts per email address.</param>
     public JwtAuthController(UserManager<IdentityUser> userManager,
                              TokenService tokenService,
                              IAuthEmailSender emailSender,
                              ILogger<JwtAuthController> logger,
-                             IAppSettings appSettings)//Todo: Add options, IOptions<JWTControllerOptions> options) //ApplicationDbContext context
+                             IAppSettings appSettings,
+                             AppBaseUrl appBaseUrl,
+                             PasswordResetRateLimiter resetRateLimiter)//Todo: Add options, IOptions<JWTControllerOptions> options) //ApplicationDbContext context
     {
         _userManager = userManager;
         //_context = context;
@@ -63,6 +71,8 @@ public class JwtAuthController : ControllerBase
         _tokenService = tokenService;
         _logger = logger;
         _AppSettings = appSettings;
+        _AppBaseUrl = appBaseUrl;
+        _ResetRateLimiter = resetRateLimiter;
     }
 
     /// <summary>
@@ -130,25 +140,22 @@ public class JwtAuthController : ControllerBase
     /// </summary>
     /// <remarks>
     /// Shared by registration and forgot-password, which is why the wording is parameterised
-    /// rather than fixed. The link is built from the request's <c>Referer</c> header, so the
-    /// address a user receives depends on what the caller sent - a request with no Referer
-    /// produces a relative, unusable URL, and a forged one sends your reset token somewhere else.
-    /// A configured base URL would be the fix.
+    /// rather than fixed. The link is built from the configured <see cref="AppBaseUrl"/> and
+    /// never from the request: until 2026-09-18 it came from the <c>Referer</c> header, which
+    /// meant an anonymous caller could choose the domain a real reset token was mailed to.
     /// </remarks>
     /// <param name="user">The account the reset link is for.</param>
     /// <param name="subject">The email subject line.</param>
     /// <param name="bodyPrefix">Text placed before "clicking here" in the body.</param>
     private async Task SendRegistrationEmail(IdentityUser user, string subject, string bodyPrefix)
     {
-
-        var referrer = HttpContext.Request.Headers.Referer;
-
         // For more information on how to enable account confirmation and password reset please 
         // visit https://go.microsoft.com/fwlink/?LinkID=532713
         var code = await _userManager.GeneratePasswordResetTokenAsync(user);
         code = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(code));
 
-        var callbackUrl = QueryHelpers.AddQueryString($"{referrer}Account/PasswordReset", "code", code);
+        var resetPage = _AppBaseUrl.PathTo("Account/PasswordReset");
+        var callbackUrl = QueryHelpers.AddQueryString(resetPage.AbsoluteUri, "code", code);
 
         //Send Email With Callback URL to reset the password
         await _EmailSender.SendEmailAsync(
@@ -172,6 +179,14 @@ public class JwtAuthController : ControllerBase
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
+        // Before the lookup, and regardless of whether the account exists, so that a 429 cannot
+        // be used to tell a registered address from an unregistered one.
+        if (!_ResetRateLimiter.TryAcquire(forgotPasswordRequest.Email))
+        {
+            _logger.LogWarning("'Forgot Password' rate limit reached for an address; request rejected.");
+            return StatusCode(StatusCodes.Status429TooManyRequests);
+        }
+
         var user = await _userManager.FindByEmailAsync(forgotPasswordRequest.Email);
         if (user == null || !(await _userManager.IsEmailConfirmedAsync(user)))
         {
@@ -187,7 +202,10 @@ public class JwtAuthController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error in API endpoint 'ForgotPassword'");
+            // The caller still gets 200 - telling them the send failed would tell them the
+            // account exists. The operator needs to know, though: before this carried the user
+            // id, a mail outage was indistinguishable from a quiet success in the log.
+            _logger.LogError(ex, "'Forgot Password' email could not be sent for user {UserId}.", user.Id);
         }
 
         return Ok();
@@ -207,6 +225,14 @@ public class JwtAuthController : ControllerBase
         if (!ModelState.IsValid)
         {
             return BadRequest(ModelState);
+        }
+
+        // Shares the forgot-password budget, so guessing at reset codes costs the same attempts
+        // as asking for them.
+        if (!_ResetRateLimiter.TryAcquire(passwordResetRequest.Email))
+        {
+            _logger.LogWarning("'Reset Password' rate limit reached for an address; request rejected.");
+            return StatusCode(StatusCodes.Status429TooManyRequests);
         }
 
         var user = await _userManager.FindByEmailAsync(passwordResetRequest.Email);
