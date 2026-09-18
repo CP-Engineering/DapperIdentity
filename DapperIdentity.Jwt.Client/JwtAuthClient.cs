@@ -1,9 +1,8 @@
-﻿using CPE.DapperIdentity.Abstractions.Models;
+using CPE.DapperIdentity.Abstractions.Models;
 using Microsoft.Extensions.Configuration;
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net.Http.Headers;
+using System.Net;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -11,15 +10,23 @@ using Microsoft.Extensions.Logging;
 
 namespace CPE.DapperIdentity.Jwt.Client
 {
+    /// <summary>
+    /// HTTP client for the server's JWT endpoints: login, refresh, forgot-password and reset.
+    /// </summary>
     public class JwtAuthClient
     {
         private static string AuthServerSectionName = "AuthServer";
         private static string AuthServerEndpoint = "Endpoint";
 
+        private static readonly JsonSerializerOptions CaseInsensitive =
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+
+        /// <summary>Base address of the authentication server.</summary>
         public Uri Endpoint { get; set; }
 
         private readonly ILogger<JwtAuthClient>? _logger;
 
+        /// <summary>Reads the auth server address from configuration.</summary>
         /// <param name="configuration">
         /// Must contain an <c>AuthServer:Endpoint</c> value; the constructor throws without it.
         /// </param>
@@ -40,12 +47,13 @@ namespace CPE.DapperIdentity.Jwt.Client
 
         }
 
-        /// <summary>
-        /// Login Method
-        /// </summary>
-        /// <param name="userForAuthentication"></param>
-        /// <returns></returns>
-        public async Task<AuthResponse> Login(AuthRequest userForAuthentication)
+        /// <summary>Authenticates a user against the server.</summary>
+        /// <param name="userForAuthentication">The credentials to present.</param>
+        /// <returns>
+        /// A result carrying tokens, or the reason there are none. Network failures are not
+        /// caught here and surface as exceptions.
+        /// </returns>
+        public async Task<AuthResult> Login(AuthRequest userForAuthentication)
         {
             using (var client = new HttpClient())
             {
@@ -56,40 +64,30 @@ namespace CPE.DapperIdentity.Jwt.Client
                 var req = new HttpRequestMessage(HttpMethod.Post, "api/jwtauth/login");
                 req.Content = bodyContent;
 
-                //client.GenerateCurlInConsole(req);
-                //var authResult = await client.PostAsync("api/jwtauth/login", bodyContent);
-
                 var authResult = await client.SendAsync(req);
-                var authContent = await authResult.Content.ReadAsStringAsync();
-                if (!authResult.IsSuccessStatusCode)
-                    return new AuthResponse();
-
-                var result = JsonSerializer.Deserialize<AuthResponse>(authContent, new JsonSerializerOptions() { PropertyNameCaseInsensitive = true }); ;//, _options);
                 if (!authResult.IsSuccessStatusCode)
                 {
-                    return result;
+                    return AuthResult.Failed(ClassifyStatus(authResult.StatusCode, "login"));
                 }
 
-
-                //return new AuthResponseDto { IsAuthSuccessful = true };
-                return result;
-                //await _localStorage.SetItemAsync("authToken", result.Token);
-
-                return new AuthResponse();
+                var authContent = await authResult.Content.ReadAsStringAsync();
+                return ToAuthResult(authContent, "login");
             }
         }
 
-        public async Task<AuthResponse> Login(string username, string password)
+        /// <summary>Authenticates a user from a bare username and password.</summary>
+        /// <param name="username">The account's email address.</param>
+        /// <param name="password">The account's password.</param>
+        /// <returns>A result carrying tokens, or the reason there are none.</returns>
+        public async Task<AuthResult> Login(string username, string password)
         {
             return await Login(new AuthRequest { Email = username, Password = password });
         }
 
-        /// <summary>
-        /// Request a refresh Token
-        /// </summary>
-        /// <param name="refreshObject"></param>
-        /// <returns></returns>
-        public async Task<AuthResponse> RefreshToken(RefreshTokenDto refreshObject)
+        /// <summary>Exchanges an expiring token pair for a fresh one.</summary>
+        /// <param name="refreshObject">The current access token and refresh token.</param>
+        /// <returns>A result carrying new tokens, or the reason there are none.</returns>
+        public async Task<AuthResult> RefreshToken(RefreshTokenDto refreshObject)
         {
             using (var client = new HttpClient())
             {
@@ -100,27 +98,72 @@ namespace CPE.DapperIdentity.Jwt.Client
                 var req = new HttpRequestMessage(HttpMethod.Post, "api/jwtauth/refresh");
                 req.Content = bodyContent;
 
-                //client.GenerateCurlInConsole(req);
-                //var authResult = await client.PostAsync("api/jwtauth/login", bodyContent);
-
                 var authResult = await client.SendAsync(req);
                 if (!authResult.IsSuccessStatusCode)
                 {
-                    return new AuthResponse();
+                    return AuthResult.Failed(ClassifyStatus(authResult.StatusCode, "refresh"));
                 }
+
                 var authContent = await authResult.Content.ReadAsStringAsync();
-                var result = JsonSerializer.Deserialize<AuthResponse>(authContent, new JsonSerializerOptions() { PropertyNameCaseInsensitive = true }); ;//, _options);
-                return result;
-                /*
-                if (!authResult.IsSuccessStatusCode)
-                {
-                    return result;
-                }
-                */
+                return ToAuthResult(authContent, "refresh");
             }
         }
 
+        /// <summary>
+        /// Turns a successful response body into a result, mapping the wire model rather than
+        /// carrying it forward.
+        /// </summary>
+        /// <remarks>
+        /// A 200 with an unreadable or token-less body is a server fault, not a credentials
+        /// problem, so it is reported as <see cref="AuthFailure.MalformedResponse"/> rather than
+        /// being flattened into "login failed" the way an empty response used to be.
+        /// </remarks>
+        private AuthResult ToAuthResult(string body, string operation)
+        {
+            AuthResponse? response;
+            try
+            {
+                response = JsonSerializer.Deserialize<AuthResponse>(body, CaseInsensitive);
+            }
+            catch (JsonException ex)
+            {
+                _logger?.LogWarning(ex, "The {Operation} response from {Endpoint} was not valid JSON.", operation, Endpoint);
+                return AuthResult.Failed(AuthFailure.MalformedResponse);
+            }
 
+            // Deserialize returns null for a literal "null" body, and a body with no token is
+            // equally unusable - both mean the server said 200 but gave us nothing to sign in with.
+            if (response is null || string.IsNullOrWhiteSpace(response.Token))
+            {
+                _logger?.LogWarning("The {Operation} response from {Endpoint} carried no access token.", operation, Endpoint);
+                return AuthResult.Failed(AuthFailure.MalformedResponse);
+            }
+
+            return AuthResult.Success(new AuthTokens(
+                response.Token,
+                response.RefreshToken,
+                response.Username,
+                response.Email));
+        }
+
+        /// <summary>Maps an unsuccessful HTTP status onto a failure reason.</summary>
+        private AuthFailure ClassifyStatus(HttpStatusCode status, string operation)
+        {
+            // 400 and 401 are both how this server declines an attempt; anything else is the
+            // server or the route misbehaving, which the caller may want to retry rather than
+            // re-prompt for a password.
+            if (status == HttpStatusCode.Unauthorized || status == HttpStatusCode.BadRequest)
+            {
+                return AuthFailure.InvalidCredentials;
+            }
+
+            _logger?.LogWarning("The {Operation} request to {Endpoint} returned {Status}.", operation, Endpoint, (int)status);
+            return AuthFailure.ServerError;
+        }
+
+        /// <summary>Asks the server to start a password reset for the given address.</summary>
+        /// <param name="username">The account's email address.</param>
+        /// <returns><see langword="false"/> only when the request never completed.</returns>
         public async Task<bool> ForgotPassword(string username)
         {
             using (var client = new HttpClient())
@@ -133,8 +176,6 @@ namespace CPE.DapperIdentity.Jwt.Client
                 var req = new HttpRequestMessage(HttpMethod.Post, "api/jwtauth/forgotpassword");
                 req.Content = bodyContent;
 
-                //client.GenerateCurlInConsole(req);
-                //var authResult = await client.PostAsync("api/jwtauth/login", bodyContent);
                 try
                 {
                     // Deliberately true whichever status comes back, and not a ToDo. The server's
@@ -158,6 +199,11 @@ namespace CPE.DapperIdentity.Jwt.Client
             }
         }
 
+        /// <summary>Completes a password reset with the code the user received.</summary>
+        /// <param name="userName">The account's email address.</param>
+        /// <param name="password">The new password.</param>
+        /// <param name="code">The reset code issued by the server.</param>
+        /// <returns><see langword="true"/> when the server accepted the reset.</returns>
         public async Task<bool> ResetPassword(string userName, string password, string code)
         {
             using (var client = new HttpClient())
@@ -170,22 +216,8 @@ namespace CPE.DapperIdentity.Jwt.Client
                 var req = new HttpRequestMessage(HttpMethod.Post, "api/jwtauth/ResetPassword");
                 req.Content = bodyContent;
 
-                //client.GenerateCurlInConsole(req);
-                //var authResult = await client.PostAsync("api/jwtauth/login", bodyContent);
-
                 var authResult = await client.SendAsync(req);
-                var authContent = await authResult.Content.ReadAsStringAsync();
-                if (!authResult.IsSuccessStatusCode)
-                    return false;// new AuthResponse(); //ToDo: Change Return Type
-
-
-
-                //var result = JsonSerializer.Deserialize<AuthResponse>(authContent, new JsonSerializerOptions() { PropertyNameCaseInsensitive = true }); //, _options);
-                else
-                {
-                    return true;
-                }
-
+                return authResult.IsSuccessStatusCode;
             }
         }
 

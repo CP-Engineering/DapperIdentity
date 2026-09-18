@@ -1,6 +1,5 @@
 using Blazored.LocalStorage;
 using CPE.DapperIdentity.Abstractions.Models;
-using System.Net.Http.Headers;
 using System.Text.Json;
 
 namespace CPE.DapperIdentity.Jwt.Client;
@@ -26,7 +25,7 @@ namespace CPE.DapperIdentity.Jwt.Client;
 /// <para>
 /// <c>HttpClient.DefaultRequestHeaders</c> is intentionally not managed here.
 /// Auth header stamping is the sole responsibility of <see cref="HttpInterceptorService"/>,
-/// which calls <see cref="GetCurrentTokenAsync"/> through <see cref="RefreshTokenService"/>.
+/// which calls <see cref="GetCurrentTokenAsync"/> through <c>RefreshTokenService</c>.
 /// </para>
 /// </remarks>
 public class JwtWasmClient
@@ -75,7 +74,7 @@ public class JwtWasmClient
         if (IsTokenExpiringSoon(token))
         {
             var refreshed = await RefreshToken();
-            return string.IsNullOrEmpty(refreshed.Token) ? null : refreshed.Token;
+            return refreshed.Succeeded ? refreshed.Tokens.Token : null;
         }
 
         return token;
@@ -98,7 +97,7 @@ public class JwtWasmClient
 
     /// <summary>
     /// Determines whether the given token is within the specified number of minutes
-    /// of expiry. Used by <see cref="RefreshTokenService"/> to decide whether a
+    /// of expiry. Used by <c>RefreshTokenService</c> to decide whether a
     /// proactive refresh is warranted before the current request.
     /// </summary>
     /// <param name="token">Raw JWT string to inspect.</param>
@@ -143,16 +142,16 @@ public class JwtWasmClient
     /// after a successful login.
     /// </param>
     /// <returns>
-    /// The server's <see cref="AuthResponse"/>, including the JWT and refresh token.
-    /// Returns an empty response (no token) on failure.
+    /// A successful <see cref="AuthResult"/> carrying the tokens, or a failed one naming the
+    /// reason. Nothing is written to storage and no notification is raised on failure.
     /// </returns>
-    public async Task<AuthResponse> Login(AuthRequest userForAuthentication, Action<string> notifyUserAuthentication)
+    public async Task<AuthResult> Login(AuthRequest userForAuthentication, Action<string> notifyUserAuthentication)
     {
         var result = await _jwtAuthClient.Login(userForAuthentication);
-        if (string.IsNullOrWhiteSpace(result.Token)) return result;
+        if (!result.Succeeded) return result;
 
-        await SetTokensAsync(result);
-        notifyUserAuthentication(result.Token);
+        await SetTokensAsync(result.Tokens);
+        notifyUserAuthentication(result.Tokens.Token);
         return result;
     }
 
@@ -167,8 +166,7 @@ public class JwtWasmClient
     /// </param>
     public async Task Logout(Action notifyUserLogout)
     {
-        _cachedToken = null;
-        await _localStorage.RemoveItemsAsync(new[] { AuthTokenKey, RefreshTokenKey });
+        await ClearTokensAsync();
         notifyUserLogout();
     }
 
@@ -176,13 +174,32 @@ public class JwtWasmClient
     /// Exchanges the stored refresh token for a new JWT, updates localStorage,
     /// and warms the in-memory cache with the new token.
     /// </summary>
-    /// <returns>The refreshed <see cref="AuthResponse"/>.</returns>
-    public async Task<AuthResponse> RefreshToken()
+    /// <returns>
+    /// A successful <see cref="AuthResult"/> carrying the new tokens, or a failed one naming
+    /// the reason.
+    /// </returns>
+    /// <remarks>
+    /// Storage is only touched when the outcome is unambiguous. A rejected refresh token means
+    /// the session is genuinely over, so the stored pair is cleared; a server error or an
+    /// unreadable reply says nothing about the session, so the existing tokens are left alone to
+    /// be retried. The previous version wrote the response's nulls to storage either way, which
+    /// turned any transient server hiccup into a silent logout.
+    /// </remarks>
+    public async Task<AuthResult> RefreshToken()
     {
         var token = await _localStorage.GetItemAsync<string>(AuthTokenKey);
         var refreshToken = await _localStorage.GetItemAsync<string>(RefreshTokenKey);
         var result = await _jwtAuthClient.RefreshToken(new RefreshTokenDto { Token = token, RefreshToken = refreshToken });
-        await SetTokensAsync(result);
+
+        if (result.Succeeded)
+        {
+            await SetTokensAsync(result.Tokens);
+        }
+        else if (result.Failure == AuthFailure.InvalidCredentials)
+        {
+            await ClearTokensAsync();
+        }
+
         return result;
     }
 
@@ -209,10 +226,17 @@ public class JwtWasmClient
     /// Called by <see cref="Login"/> and <see cref="RefreshToken"/> after a
     /// successful server response.
     /// </summary>
-    private async Task SetTokensAsync(AuthResponse authResponse)
+    private async Task SetTokensAsync(AuthTokens tokens)
     {
-        _cachedToken = authResponse.Token;
-        await _localStorage.SetItemAsync(AuthTokenKey, authResponse.Token);
-        await _localStorage.SetItemAsync(RefreshTokenKey, authResponse.RefreshToken);
+        _cachedToken = tokens.Token;
+        await _localStorage.SetItemAsync(AuthTokenKey, tokens.Token);
+        await _localStorage.SetItemAsync(RefreshTokenKey, tokens.RefreshToken);
+    }
+
+    /// <summary>Removes both tokens from localStorage and empties the in-memory cache.</summary>
+    private async Task ClearTokensAsync()
+    {
+        _cachedToken = null;
+        await _localStorage.RemoveItemsAsync(new[] { AuthTokenKey, RefreshTokenKey });
     }
 }
