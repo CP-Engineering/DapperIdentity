@@ -24,13 +24,63 @@ In your API project Add the entries to secrets.json/AppSettings.json whatever ap
     "RefreshTokenLifeDays": 4
   }
 ```
+
+#### Password-reset and registration links
+
+The API emails users a link to set or reset their password. Two settings control it.
+
+**`DapperIdentity:AppBaseUrl` — required.** The public address of the app that hosts the
+password-reset page, used to build that link. Note that this is the address of your *front end*
+(for example your Blazor app), not of the API, even though it is set in the API's configuration.
+It differs per environment, so it belongs in `appsettings.{Environment}.json` or wherever your
+environment-specific settings live:
+
+```json
+  "DapperIdentity": {
+    "AppBaseUrl": "https://app.example.com"
+  }
+```
+
+The API **will not start** without it, and says so by name. There is deliberately no fallback:
+the only one available would be the incoming request, and deriving the link from a request
+header lets anyone who can call the forgot-password endpoint choose where a real reset token is
+sent.
+
+**`DapperIdentity:PasswordLinkLifetime` — optional, default 24 hours.** How long a link stays
+valid, as `hours:minutes:seconds`. It must be between **15 minutes and 24 hours**; anything else
+stops the API starting. It is a policy rather than a per-environment value, so set it once in
+`appsettings.json` if you set it at all:
+
+```json
+  "DapperIdentity": {
+    "PasswordLinkLifetime": "01:00:00"
+  }
+```
+
+You can also set it in code, the standard ASP.NET Core way. A `Configure` call made *after*
+`AddJwtIdentity` takes precedence over both the default and the configuration key:
+
+```c#
+  builder.Services.AddJwtIdentity(builder.Configuration);
+  builder.Services.Configure<DataProtectionTokenProviderOptions>(o => o.TokenLifespan = TimeSpan.FromMinutes(30));
+```
+
+The same 15-minute-to-24-hour range applies however the value is set, and the emails always quote
+the lifetime actually being enforced.
+
+> **A persisted Data Protection key ring is required for this lifetime to hold.** The token in the
+> link is sealed with a Data Protection key rather than stored. If the key ring is ephemeral — on
+> IIS, an app pool that does not load its user profile — every outstanding link dies at the next
+> app-pool recycle, whatever lifetime is configured. On IIS the fix is to set the app pool's
+> **Load User Profile** to `True`.
+
 In `program.cs` Add the following:
 ```c#
   builder.Services.AddIAppSettings(new MyAppSettings()); //Create a class that implements IAppSettings
   builder.Services.AddDbConnectionInstantiatorForRepositories<MySqlConnection>(conStrBuilder.GetConnectionString(true)); //eg
-  builder.Services.AddJWTIdentity(builder.Configuration);
+  builder.Services.AddJwtIdentity(builder.Configuration);
 
-  builder.Services.AddTransient<IEmailSender, EmailSender>();
+  builder.Services.AddTransient<IAuthEmailSender, EmailSender>(); //Create a class that implements IAuthEmailSender
 
 ```
 

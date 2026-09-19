@@ -65,6 +65,28 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(AppBaseUrl.FromConfiguration(configuration));
         services.AddSingleton(new PasswordResetRateLimiter());
 
+        // Stated rather than inherited. The framework's own default is one day, but the email
+        // tells the recipient how long their link lasts, so the lifetime is set explicitly and
+        // the email reads it back from this same option - never from a constant a consumer's
+        // override could leave behind.
+        //
+        // The range check sits on the option rather than on the configuration key so that it
+        // covers every way the value can be set. A consumer calling Configure after this would
+        // otherwise walk straight past a check made only on appsettings. ValidateOnStart makes
+        // an out-of-range value stop the application starting, rather than surfacing the first
+        // time someone asks for a reset link.
+        var linkLifetime = DapperIdentityDefaults.ReadPasswordLinkLifetime(configuration);
+        services.AddOptions<DataProtectionTokenProviderOptions>()
+                .Configure(o => o.TokenLifespan = linkLifetime)
+                .Validate(
+                    o => DapperIdentityDefaults.IsPermittedPasswordLinkLifetime(o.TokenLifespan),
+                    $"The password-link lifetime must be between " +
+                    $"{DapperIdentityDefaults.Describe(DapperIdentityDefaults.MinimumPasswordLinkLifetime)} and " +
+                    $"{DapperIdentityDefaults.Describe(DapperIdentityDefaults.MaximumPasswordLinkLifetime)}. " +
+                    $"It is set by '{DapperIdentityDefaults.PasswordLinkLifetimeConfigurationKey}' or by a " +
+                    "Configure<DataProtectionTokenProviderOptions> call.")
+                .ValidateOnStart();
+
         services.TryAddDapperIdentityDatabaseStores();
         services.AddScoped<TokenService>();
         // Route JwtAuthController and nothing else from this assembly. Adding the AssemblyPart on

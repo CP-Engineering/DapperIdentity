@@ -7,6 +7,7 @@ using CPE.DapperIdentity.Abstractions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Encodings.Web;
@@ -47,6 +48,8 @@ public class JwtAuthController : ControllerBase
 
     private readonly PasswordResetRateLimiter _ResetRateLimiter;
 
+    private readonly IOptions<DataProtectionTokenProviderOptions> _TokenOptions;
+
     /// <summary>Captures the services the endpoints need.</summary>
     /// <param name="userManager">Identity's user manager.</param>
     /// <param name="tokenService">Issues access and refresh tokens.</param>
@@ -57,14 +60,20 @@ public class JwtAuthController : ControllerBase
     /// </param>
     /// <param name="appBaseUrl">The application's public address, used to build the reset link.</param>
     /// <param name="resetRateLimiter">Caps reset attempts per email address.</param>
+    /// <param name="tokenOptions">
+    /// The token provider's settings, read for the link lifetime quoted in emails - the value the
+    /// server actually enforces, however it was set.
+    /// </param>
     public JwtAuthController(UserManager<IdentityUser> userManager,
                              TokenService tokenService,
                              IAuthEmailSender emailSender,
                              ILogger<JwtAuthController> logger,
                              IAppSettings appSettings,
                              AppBaseUrl appBaseUrl,
-                             PasswordResetRateLimiter resetRateLimiter)//Todo: Add options, IOptions<JWTControllerOptions> options) //ApplicationDbContext context
+                             PasswordResetRateLimiter resetRateLimiter,
+                             IOptions<DataProtectionTokenProviderOptions> tokenOptions)//Todo: Add options, IOptions<JWTControllerOptions> options) //ApplicationDbContext context
     {
+        _TokenOptions = tokenOptions;
         _userManager = userManager;
         //_context = context;
         _EmailSender = emailSender;
@@ -120,8 +129,15 @@ public class JwtAuthController : ControllerBase
             }
             await _userManager.AddClaimsAsync(user, claims);
 
-            //send email
-            await SendRegistrationEmail(user, $"{_AppSettings.ApplicationName}: Welcome! User Registration", $"Welcome! You have been registered to access {_AppSettings.ApplicationName}! Complete your registration by");
+            // "Ignore this" would be the wrong advice here: an administrator created this account,
+            // so an unexpected one is something to report rather than something to disregard.
+            await SendPasswordLinkEmail(
+                user,
+                $"{_AppSettings.ApplicationName}: Complete your registration",
+                $"An account has been created for you on {AppNameHtml}. Set your password by",
+                $"This link expires in {LinkLifetimeText} and " +
+                "can only be used once. If you were not expecting this account, contact your " +
+                "administrator before using the link.");
 
             //return
             return CreatedAtAction(nameof(Register), new { email = request.Email,/* role = request.Role */}, request);
@@ -139,15 +155,25 @@ public class JwtAuthController : ControllerBase
     /// Mints a password-reset token and emails the user a link to set their password.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Shared by registration and forgot-password, which is why the wording is parameterised
-    /// rather than fixed. The link is built from the configured <see cref="AppBaseUrl"/> and
-    /// never from the request: until 2026-09-18 it came from the <c>Referer</c> header, which
-    /// meant an anonymous caller could choose the domain a real reset token was mailed to.
+    /// rather than fixed. The two flows need different closing advice: a reset the recipient did
+    /// not ask for is safe to ignore, but an account an administrator created for them is not.
+    /// </para>
+    /// <para>
+    /// The link is built from the configured <see cref="AppBaseUrl"/> and never from the request:
+    /// until 2026-09-18 it came from the <c>Referer</c> header, which meant an anonymous caller
+    /// could choose the domain a real reset token was mailed to.
+    /// </para>
     /// </remarks>
-    /// <param name="user">The account the reset link is for.</param>
+    /// <param name="user">The account the link is for.</param>
     /// <param name="subject">The email subject line.</param>
-    /// <param name="bodyPrefix">Text placed before "clicking here" in the body.</param>
-    private async Task SendRegistrationEmail(IdentityUser user, string subject, string bodyPrefix)
+    /// <param name="opening">
+    /// Trusted HTML placed before the link. Anything consumer-supplied in it must already be
+    /// encoded by the caller.
+    /// </param>
+    /// <param name="closing">Trusted HTML placed after the link: what to do if this was unexpected.</param>
+    private async Task SendPasswordLinkEmail(IdentityUser user, string subject, string opening, string closing)
     {
         // For more information on how to enable account confirmation and password reset please 
         // visit https://go.microsoft.com/fwlink/?LinkID=532713
@@ -157,13 +183,32 @@ public class JwtAuthController : ControllerBase
         var resetPage = _AppBaseUrl.PathTo("Account/PasswordReset");
         var callbackUrl = QueryHelpers.AddQueryString(resetPage.AbsoluteUri, "code", code);
 
-        //Send Email With Callback URL to reset the password
         await _EmailSender.SendEmailAsync(
             user.Email,
             subject,
-            $"{bodyPrefix} <a href='{HtmlEncoder.Default.Encode(callbackUrl)}'>clicking here</a>.");
-
+            $"<p>{opening} <a href='{HtmlEncoder.Default.Encode(callbackUrl)}'>clicking here</a>.</p>" +
+            $"<p>{closing}</p>");
     }
+
+    /// <summary>
+    /// The application name, safe to place in an HTML email body.
+    /// </summary>
+    /// <remarks>
+    /// Consumer-supplied, so it is encoded before it reaches markup. An ampersand in a clinic's
+    /// name would otherwise render wrongly, and anything stranger would render as HTML.
+    /// </remarks>
+    private string AppNameHtml => HtmlEncoder.Default.Encode(_AppSettings.ApplicationName);
+
+    /// <summary>
+    /// The link lifetime as it should read in an email, taken from the option the token provider
+    /// enforces.
+    /// </summary>
+    /// <remarks>
+    /// Read from the option on purpose, not from <see cref="DapperIdentityDefaults.PasswordLinkLifetime"/>.
+    /// That constant is only the default; a consumer who shortens the lifetime in configuration or
+    /// code would otherwise get emails still promising the old one.
+    /// </remarks>
+    private string LinkLifetimeText => DapperIdentityDefaults.Describe(_TokenOptions.Value.TokenLifespan);
 
 
     /// <summary>
@@ -197,7 +242,16 @@ public class JwtAuthController : ControllerBase
 
         try
         {
-            await SendRegistrationEmail(user, $"{_AppSettings.ApplicationName}: Reset Password", "Please reset your password by");
+            // The closing line is the recipient's only signal that someone else is trying their
+            // account - the rate limiter caps how often, not whether - so it has to say plainly
+            // that doing nothing is safe.
+            await SendPasswordLinkEmail(
+                user,
+                $"{_AppSettings.ApplicationName}: Reset your password",
+                $"Someone asked to reset the password for your {AppNameHtml} account. Choose a new one by",
+                $"This link expires in {LinkLifetimeText} and " +
+                "can only be used once. If you did not ask for this, you can safely ignore this " +
+                "email - your password will not change unless you use the link above.");
 
         }
         catch (Exception ex)
@@ -249,7 +303,14 @@ public class JwtAuthController : ControllerBase
         var result = await _userManager.ResetPasswordAsync(user, code, passwordResetRequest.Password);
         if (result.Succeeded)
         {
-            await _EmailSender.SendEmailAsync(passwordResetRequest.Email, "Password Reset Successful", "Your password was successfully reset. If you did not change your password, please contact application administrator.");
+            // Unlike the reset request, this one must NOT say "safe to ignore": by now the password
+            // really has changed, so an unexpected one means someone else may be in the account.
+            await _EmailSender.SendEmailAsync(
+                passwordResetRequest.Email,
+                $"{_AppSettings.ApplicationName}: Your password was changed",
+                $"<p>The password for your {AppNameHtml} account was just changed.</p>" +
+                "<p>If you made this change, no action is needed. If you did not, contact your " +
+                "administrator immediately - someone else may have access to your account.</p>");
             return Ok("Password Reset Successful");
             //return RedirectToPage("./ResetPasswordConfirmation");
         }
