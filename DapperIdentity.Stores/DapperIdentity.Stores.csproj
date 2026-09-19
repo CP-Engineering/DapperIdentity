@@ -51,10 +51,14 @@
   <ItemGroup>
     <!-- These scripts are the only record of the tables the stores expect, so they must reach the
          consumer: Pack puts them in the .nupkg, CopyToOutputDirectory puts them where the test
-         suite can execute the real file rather than a copy that has drifted from it. -->
-    <Content Include="SQL_Create\*.txt"
+         suite can execute the real file rather than a copy that has drifted from it.
+         Forward slashes on purpose: with PackagePath="sql\" the Windows pack had both scripts
+         under sql/, but the Linux CI pack did not, while the tests that read the same files from
+         the output folder passed on that same runner - so the Include matched and the package path
+         was what broke. -->
+    <Content Include="SQL_Create/*.txt"
              Pack="true"
-             PackagePath="sql\"
+             PackagePath="sql/"
              CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

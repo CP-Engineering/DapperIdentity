@@ -50,7 +50,8 @@ done
 # The table scripts are the only record of the schema the stores expect.
 STORES=$(unzip -l "$DIR/CPE.DapperIdentity.Stores.$VERSION.nupkg")
 for f in sql/mysql.txt sql/Sqlite.txt; do
-  grep -q "$f" <<<"$STORES" || fail "CPE.DapperIdentity.Stores is missing $f."
+  # Print what IS there before failing, so the next miss explains itself from the CI log.
+  grep -q "$f" <<<"$STORES" || { echo "$STORES"; fail "CPE.DapperIdentity.Stores is missing $f."; }
 done
 
 echo "All ${#IDS[@]} packages present at $VERSION, contents and dependencies consistent."
