@@ -14,4 +14,12 @@
     <RootNamespace>CPE.DapperIdentity.Abstractions</RootNamespace>
   </PropertyGroup>
 
+  <!-- Version and shared metadata come from Directory.Build.props. -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>CPE.DapperIdentity.Abstractions</PackageId>
+    <Description>Contracts shared by the CPE.DapperIdentity packages: the auth request/response models that travel between client and server, and the interfaces a host implements (ICustomIdentityUser, IAuthEmailSender, IAppSettings). No dependencies, so a browser client can take it without the Dapper stack.</Description>
+    <PackageTags>identity;aspnetcore;authentication;dapper;contracts</PackageTags>
+  </PropertyGroup>
+
 </Project>

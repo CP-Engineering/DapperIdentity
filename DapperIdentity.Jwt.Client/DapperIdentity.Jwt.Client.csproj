@@ -11,6 +11,14 @@
     <RootNamespace>CPE.DapperIdentity.Jwt.Client</RootNamespace>
   </PropertyGroup>
 
+  <!-- Version and shared metadata come from Directory.Build.props. -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>CPE.DapperIdentity.Jwt.Client</PackageId>
+    <Description>Blazor WebAssembly client for CPE.DapperIdentity.Jwt.Server: login and registration calls with typed results, token storage and refresh in browser local storage, and an HTTP interceptor that refreshes the bearer token before it expires.</Description>
+    <PackageTags>identity;blazor;webassembly;jwt;authentication</PackageTags>
+  </PropertyGroup>
+
   <ItemGroup>
     <!-- HttpClientToCurl removed 2026-09-13: a request-to-curl debug aid whose only calls in
          JWTAuthClient were already commented out, so it was a dependency every consumer would

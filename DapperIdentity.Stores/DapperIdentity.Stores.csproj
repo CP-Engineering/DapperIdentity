@@ -14,6 +14,14 @@
     <RootNamespace>CPE.DapperIdentity.Stores</RootNamespace>
   </PropertyGroup>
 
+  <!-- Version and shared metadata come from Directory.Build.props. -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>CPE.DapperIdentity.Stores</PackageId>
+    <Description>ASP.NET Core Identity user and role stores backed by Dapper instead of Entity Framework, for MySQL/MariaDB and SQLite. Includes the table-creation scripts under sql/ in the package.</Description>
+    <PackageTags>identity;aspnetcore;dapper;userstore;rolestore;mysql;mariadb;sqlite</PackageTags>
+  </PropertyGroup>
+
   <ItemGroup>
     <!-- The Identity types (SignInManager, IUserStore, IRoleStore, UserManager) come from the
          shared framework, NOT from a package. The old Microsoft.AspNetCore.Identity 2.3.9

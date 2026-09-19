@@ -1,0 +1,12 @@
+<Project>
+
+  <!-- Every package carries the same README and the MIT notice. This has to be a .targets file:
+       it is imported after the project body, so it sees the IsPackable=true each shipping project
+       sets. The same condition in Directory.Build.props would read the repo-wide false and
+       silently pack neither file - and PackageReadmeFile would then fail the pack. -->
+  <ItemGroup Condition="'$(IsPackable)' == 'true'">
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)LICENSE" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+
+</Project>

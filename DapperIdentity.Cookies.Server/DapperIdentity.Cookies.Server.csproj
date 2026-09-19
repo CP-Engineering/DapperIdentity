@@ -1,10 +1,10 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <!-- Single-targeted deliberately: this project is NOT one of the four packages (D-050), so it
-         is kept building rather than shipped. The 2.x removal below is not cosmetic - leaving it
-         in the solution keeps the framework-shadowing hazard alive for anyone who builds here. -->
-    <TargetFramework>net8.0</TargetFramework>
+    <!-- Shipped as one of the five packages (D-053, superseding D-050's "not a package"): Blazor
+         Server apps on cookie authentication need the Dapper stores without JwtBearer. Targets
+         both runtimes like the other four, so a net10 host is not forced onto net8 assets. -->
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
@@ -12,6 +12,14 @@
          RootNamespace has to be stated - otherwise it defaults to the project name and every new
          file lands in the old namespace. -->
     <RootNamespace>CPE.DapperIdentity.Cookies.Server</RootNamespace>
+  </PropertyGroup>
+
+  <!-- Version and shared metadata come from Directory.Build.props. -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>CPE.DapperIdentity.Cookies.Server</PackageId>
+    <Description>Cookie authentication for ASP.NET Core and Blazor Server apps on the CPE.DapperIdentity stores, with opt-in account and identity controllers. For JWT APIs use CPE.DapperIdentity.Jwt.Server instead.</Description>
+    <PackageTags>identity;aspnetcore;blazor;cookies;authentication;dapper</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
@@ -26,8 +34,10 @@
     <!-- Microsoft.IdentityModel.JsonWebTokens removed 2026-09-14: nothing in this project mentions
          JsonWebToken, JwtSecurityToken, SecurityTokenDescriptor or SymmetricSecurityKey. A cookie
          scheme has no business carrying a JWT library.
-         System.Text.Encodings.Web stays - Helpers/BasicAuthenticatonHandler.cs:7 uses it. -->
-    <PackageReference Include="System.Text.Encodings.Web" Version="9.0.4" />
+         System.Text.Encodings.Web 9.0.4 removed 2026-09-19: its one user, the Basic auth handler
+         in Helpers/, was deleted in Session 33h, and git grep finds no Encodings/HtmlEncoder/
+         UrlEncoder use in this project. Packed, it would have been a dependency every consumer
+         restores for nothing - and the shared framework supplies it anyway. -->
   </ItemGroup>
 
   <ItemGroup>

@@ -1,0 +1,42 @@
+<Project>
+
+  <!-- Shared by every project in the repo. The five library projects opt in to packing
+       individually; everything else (the test project, anything added later) stays unpackable
+       unless it says otherwise. -->
+
+  <PropertyGroup>
+    <!-- THE version for all five packages. One number, deliberately: packing turns each
+         ProjectReference into a package dependency on the referenced project's Version, so the
+         five ids only ever resolve correctly against each other when they move together.
+         publish.yml reads this line and refuses to run if the requested version differs. -->
+    <Version>0.9.0</Version>
+
+    <Authors>CPE</Authors>
+    <Company>CPE</Company>
+    <Copyright>Copyright (c) CPE</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/CP-Engineering/DapperIdentity</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/CP-Engineering/DapperIdentity</PackageProjectUrl>
+
+    <!-- Source Link: lets a consumer step into the library source from the debugger. The .NET 8+
+         SDK ships the GitHub provider, so these properties are all it takes. -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+    <!-- Off by default; each shipping project sets it back to true next to its PackageId. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!-- Deterministic paths in CI builds only, so a local Debug build still maps to local files. -->
+  <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <!-- The README/LICENSE pack items live in Directory.Build.targets, not here: they depend on
+       IsPackable, which a project sets in its own body - after this file has been evaluated. -->
+
+</Project>

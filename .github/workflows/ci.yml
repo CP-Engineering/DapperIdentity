@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build, test, pack, verify
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Restore
+        run: dotnet restore DapperIdentity.sln
+
+      - name: Build
+        run: dotnet build DapperIdentity.sln -c Release --no-restore
+
+      - name: Test
+        run: dotnet test DapperIdentity.sln -c Release --no-build --verbosity normal
+
+      - name: Pack
+        run: dotnet pack DapperIdentity.sln -c Release --no-build -o artifacts
+
+      # The five packages only work as a set: packing turns each ProjectReference into a dependency
+      # on the referenced project's PackageId at its Version. A project that lost its PackageId or
+      # IsPackable would still be written into the others' dependency lists - pointing at a package
+      # that is never published - and every consumer's restore would fail. Read the nuspecs rather
+      # than trusting the csprojs.
+      - name: Verify package set, contents and inter-package dependencies
+        shell: bash
+        run: bash .github/scripts/verify-packages.sh artifacts
+
+      # Metadata can look right and still not restore. Install the packed output into throwaway
+      # apps from a local feed, on both target frameworks, and build them.
+      - name: Verify from throwaway consumers
+        shell: bash
+        run: bash .github/scripts/verify-consumers.sh "$GITHUB_WORKSPACE/artifacts"
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
+          if-no-files-found: error

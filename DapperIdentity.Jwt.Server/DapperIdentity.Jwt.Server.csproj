@@ -11,6 +11,14 @@
     <RootNamespace>CPE.DapperIdentity.Jwt.Server</RootNamespace>
   </PropertyGroup>
 
+  <!-- Version and shared metadata come from Directory.Build.props. -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>CPE.DapperIdentity.Jwt.Server</PackageId>
+    <Description>JWT bearer authentication for ASP.NET Core APIs on the CPE.DapperIdentity stores: token issue and refresh, registration, and a rate-limited password-reset flow whose links are built from configuration, never from the request.</Description>
+    <PackageTags>identity;aspnetcore;jwt;authentication;dapper;webapi</PackageTags>
+  </PropertyGroup>
+
   <ItemGroup>
     <!-- ControllerBase, ApiController and IActionResult come from the shared framework, not from a
          package. Microsoft.AspNetCore.Mvc.Core 2.3.9 and Mvc.ViewFeatures 2.3.9 are ASP.NET Core

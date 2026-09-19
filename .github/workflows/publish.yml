@@ -1,0 +1,138 @@
+name: Publish to NuGet
+
+# Manual only, with the version typed in by hand. There is deliberately no default value: a
+# pre-filled version plus --skip-duplicate is how a run that published nothing still goes green.
+# All five packages publish together, at the one version in Directory.Build.props.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build and publish (e.g. 0.9.0). Must match Directory.Build.props."
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  id-token: write # trusted publishing; no API key is stored anywhere
+
+env:
+  IDS: >-
+    CPE.DapperIdentity.Abstractions
+    CPE.DapperIdentity.Stores
+    CPE.DapperIdentity.Jwt.Client
+    CPE.DapperIdentity.Jwt.Server
+    CPE.DapperIdentity.Cookies.Server
+
+jobs:
+  publish:
+    name: Pack and push
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      # The workflow packs HEAD, not your working tree. A version bump that was never committed
+      # ships the previous version's code under the new number.
+      - name: Check the requested version matches the committed Directory.Build.props
+        shell: bash
+        run: |
+          set -euo pipefail
+          COMMITTED=$(grep -oPm1 '(?<=<Version>)[^<]+' Directory.Build.props)
+          echo "Requested: ${{ inputs.version }}"
+          echo "Committed: $COMMITTED"
+          if [ "$COMMITTED" != "${{ inputs.version }}" ]; then
+            echo "::error::Directory.Build.props says $COMMITTED but you asked for ${{ inputs.version }}. Commit the version bump first."
+            exit 1
+          fi
+
+      # Refuses if ANY of the five exists. A half-published set cannot be topped up at the same
+      # version without --skip-duplicate, which this workflow will not use; bump and publish again.
+      - name: Refuse to publish a version that already exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          for id in $IDS; do
+            lower=$(tr '[:upper:]' '[:lower:]' <<<"$id")
+            URL="https://api.nuget.org/v3-flatcontainer/$lower/${{ inputs.version }}/$lower.${{ inputs.version }}.nupkg"
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' -L "$URL")
+            if [ "$CODE" = "200" ]; then
+              echo "::error::$id ${{ inputs.version }} is already on nuget.org. Bump the version."
+              exit 1
+            fi
+            echo "$id: not yet published (HTTP $CODE)."
+          done
+
+      - name: Restore
+        run: dotnet restore DapperIdentity.sln
+
+      - name: Build
+        run: dotnet build DapperIdentity.sln -c Release --no-restore
+
+      - name: Test
+        run: dotnet test DapperIdentity.sln -c Release --no-build
+
+      - name: Pack
+        run: dotnet pack DapperIdentity.sln -c Release --no-build -o artifacts
+
+      - name: Verify package set, contents and inter-package dependencies
+        shell: bash
+        run: bash .github/scripts/verify-packages.sh artifacts
+
+      - name: Verify from throwaway consumers
+        shell: bash
+        run: bash .github/scripts/verify-consumers.sh "$GITHUB_WORKSPACE/artifacts"
+
+      - name: Authenticate to NuGet (trusted publishing)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ vars.NUGET_USER || 'gismofx' }}
+
+      # Pushes each .nupkg; the matching .snupkg beside it goes up with it.
+      - name: Push
+        run: >
+          dotnet nuget push "artifacts/*.nupkg"
+          --source https://api.nuget.org/v3/index.json
+          --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
+
+      # A silent no-op looks like success. Only the far side proves all five went live.
+      - name: Wait for every package to go live
+        shell: bash
+        run: |
+          set -euo pipefail
+          for id in $IDS; do
+            lower=$(tr '[:upper:]' '[:lower:]' <<<"$id")
+            URL="https://api.nuget.org/v3-flatcontainer/$lower/${{ inputs.version }}/$lower.${{ inputs.version }}.nupkg"
+            for attempt in $(seq 1 40); do
+              CODE=$(curl -s -o /dev/null -w '%{http_code}' -L "$URL")
+              if [ "$CODE" = "200" ]; then
+                echo "$id live."
+                continue 2
+              fi
+              echo "$id attempt $attempt: HTTP $CODE; indexing can lag. Waiting."
+              sleep 30
+            done
+            echo "::error::$id ${{ inputs.version }} was not retrievable after 20 minutes."
+            exit 1
+          done
+
+      - name: Tag the release
+        run: |
+          git tag "v${{ inputs.version }}"
+          git push origin "v${{ inputs.version }}"
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg-${{ inputs.version }}
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
+          if-no-files-found: error

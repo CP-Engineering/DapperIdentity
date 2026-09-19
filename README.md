@@ -1,38 +1,82 @@
-# DapperIdentity
-Microsoft Identity Framework with Custom User/Role Stores using Identity
+# CPE.DapperIdentity
 
-This is geared toward using Identity Framework for Blazor Server applications where you are using Dapper for data access.
-The UserStore and RoleStore data access layer classes have been customized to use Dapper. They are in no-way complete. All of the underlying Identity Logic is unchanged, only they way Identity accesses the data in a database.
+ASP.NET Core Identity with the user and role stores backed by **Dapper** instead of Entity
+Framework. Identity's own logic is unchanged; only the way it reads and writes the database is.
 
-The `UserStore` and `RoleStore` classes use the Generic Repository here:
-https://github.com/gismofx/DapperRepository and also on NuGet: https://www.nuget.org/packages/TheDapperRepository/.
+The stores use the generic repository from
+[TheDapperRepository](https://www.nuget.org/packages/TheDapperRepository/).
 
-## Pull Requests Welcomed!
+## Packages
 
-More Examples coming soon.
+Five packages, one per dependency profile, always released together at the same version.
+Install only the ones your project needs; each pulls in what it depends on.
 
-## Getting Started
+| Package | Use it in | Brings in |
+|---|---|---|
+| `CPE.DapperIdentity.Jwt.Server` | An ASP.NET Core API issuing JWTs | Stores, Abstractions, JwtBearer |
+| `CPE.DapperIdentity.Jwt.Client` | A Blazor WebAssembly app calling that API | Abstractions, Blazored.LocalStorage |
+| `CPE.DapperIdentity.Cookies.Server` | A Blazor Server / MVC app on cookie auth | Stores, Abstractions |
+| `CPE.DapperIdentity.Stores` | Anything that only needs the Dapper stores | Abstractions, Dapper |
+| `CPE.DapperIdentity.Abstractions` | Shared contracts and wire models | nothing |
 
-### JWT Auth Tokens
-In your API project Add the entries to secrets.json/AppSettings.json whatever app secrests store you use:
+All five target `net8.0` and `net10.0`. Namespaces match the package ids
+(`CPE.DapperIdentity.Stores`, `CPE.DapperIdentity.Jwt.Client`, ...). The `Add...` registration
+methods live in `Microsoft.Extensions.DependencyInjection`, so `Program.cs` needs no extra using.
+
+## Database
+
+The tables the stores expect are defined in two scripts shipped inside
+`CPE.DapperIdentity.Stores`, under `sql/` in the package: `mysql.txt` (MySQL / MariaDB) and
+`Sqlite.txt`. Run the one for your database before first use.
+
+The stores open connections through TheDapperRepository, so register a connection factory first:
+
+```c#
+using DapperRepository;
+
+builder.Services.AddDbConnectionInstantiatorForRepositories<MySqlConnection>(connectionString);
+```
+
+## JWT: the API (`CPE.DapperIdentity.Jwt.Server`)
+
+### Configuration
+
 ```json
   "JwtTokenSettings": {
     "ValidIssuer": "ExampleIssuer",
-    "ValidAudience": "ValidAudience",
-    "SymmetricSecurityKey": "my_super_secret_key",
+    "ValidAudience": "ExampleAudience",
+    "SymmetricSecurityKey": "keep-this-in-a-secret-store-not-in-appsettings",
     "JwtExpireSeconds": 900,
     "RefreshTokenLifeDays": 4
   }
 ```
 
-#### Password-reset and registration links
+### `Program.cs`
+
+```c#
+builder.Services.AddDbConnectionInstantiatorForRepositories<MySqlConnection>(connectionString);
+builder.Services.AddIAppSettings(new MyAppSettings());            // implements IAppSettings
+builder.Services.AddTransient<IAuthEmailSender, MyEmailSender>(); // implements IAuthEmailSender
+builder.Services.AddJwtIdentity(builder.Configuration);
+```
+
+`AddJwtIdentity` registers the stores, the token service, ASP.NET Core Identity, JWT bearer
+authentication, and `JwtAuthController` at `/api/jwtauth` with `login`, `refresh`, `register`,
+`ForgotPassword` and `ResetPassword`. It routes that one controller only.
+
+`IAppSettings.ApplicationName` is the name used in account emails. `IAuthEmailSender` is how
+those emails are sent; the library never talks to an SMTP server itself.
+
+Protect your own endpoints with `[Authorize]` / `[Authorize(Roles = "...")]` as usual.
+
+### Password-reset and registration links
 
 The API emails users a link to set or reset their password. Two settings control it.
 
-**`DapperIdentity:AppBaseUrl` — required.** The public address of the app that hosts the
-password-reset page, used to build that link. Note that this is the address of your *front end*
-(for example your Blazor app), not of the API, even though it is set in the API's configuration.
-It differs per environment, so it belongs in `appsettings.{Environment}.json` or wherever your
+**`DapperIdentity:AppBaseUrl` is required.** The public address of the app that hosts the
+password-reset page, used to build that link. This is the address of your *front end* (for
+example your Blazor app), not of the API, even though it is set in the API's configuration. It
+differs per environment, so it belongs in `appsettings.{Environment}.json` or wherever your
 environment-specific settings live:
 
 ```json
@@ -42,13 +86,12 @@ environment-specific settings live:
 ```
 
 The API **will not start** without it, and says so by name. There is deliberately no fallback:
-the only one available would be the incoming request, and deriving the link from a request
-header lets anyone who can call the forgot-password endpoint choose where a real reset token is
-sent.
+the only one available would be the incoming request, and deriving the link from a request header
+lets anyone who can call the forgot-password endpoint choose where a real reset token is sent.
 
-**`DapperIdentity:PasswordLinkLifetime` — optional, default 24 hours.** How long a link stays
-valid, as `hours:minutes:seconds`. It must be between **15 minutes and 24 hours**; anything else
-stops the API starting. It is a policy rather than a per-environment value, so set it once in
+**`DapperIdentity:PasswordLinkLifetime` is optional, default 24 hours.** How long a link stays
+valid, as `hours:minutes:seconds`, between **15 minutes and 24 hours**; anything else stops the
+API starting. It is a policy rather than a per-environment value, so set it once in
 `appsettings.json` if you set it at all:
 
 ```json
@@ -57,130 +100,113 @@ stops the API starting. It is a policy rather than a per-environment value, so s
   }
 ```
 
-You can also set it in code, the standard ASP.NET Core way. A `Configure` call made *after*
-`AddJwtIdentity` takes precedence over both the default and the configuration key:
+It can also be set in code. A `Configure` call made *after* `AddJwtIdentity` takes precedence
+over both the default and the configuration key, and the same range applies:
 
 ```c#
-  builder.Services.AddJwtIdentity(builder.Configuration);
-  builder.Services.Configure<DataProtectionTokenProviderOptions>(o => o.TokenLifespan = TimeSpan.FromMinutes(30));
+builder.Services.AddJwtIdentity(builder.Configuration);
+builder.Services.Configure<DataProtectionTokenProviderOptions>(o => o.TokenLifespan = TimeSpan.FromMinutes(30));
 ```
 
-The same 15-minute-to-24-hour range applies however the value is set, and the emails always quote
-the lifetime actually being enforced.
+The emails always quote the lifetime actually being enforced.
 
 > **A persisted Data Protection key ring is required for this lifetime to hold.** The token in the
-> link is sealed with a Data Protection key rather than stored. If the key ring is ephemeral — on
-> IIS, an app pool that does not load its user profile — every outstanding link dies at the next
-> app-pool recycle, whatever lifetime is configured. On IIS the fix is to set the app pool's
+> link is sealed with a Data Protection key rather than stored. If the key ring is ephemeral (on
+> IIS, an app pool that does not load its user profile) every outstanding link dies at the next
+> app-pool recycle, whatever lifetime is configured. On IIS, set the app pool's
 > **Load User Profile** to `True`.
 
-In `program.cs` Add the following:
-```c#
-  builder.Services.AddIAppSettings(new MyAppSettings()); //Create a class that implements IAppSettings
-  builder.Services.AddDbConnectionInstantiatorForRepositories<MySqlConnection>(conStrBuilder.GetConnectionString(true)); //eg
-  builder.Services.AddJwtIdentity(builder.Configuration);
+## JWT: the Blazor WebAssembly client (`CPE.DapperIdentity.Jwt.Client`)
 
-  builder.Services.AddTransient<IAuthEmailSender, EmailSender>(); //Create a class that implements IAuthEmailSender
+### Configuration (`wwwroot/appsettings.json`)
 
+```json
+  "AuthServer": {
+    "Endpoint": "https://api.example.com"
+  }
 ```
 
-In your controller decorate your endpoints with `[Authorize]` per MS docs
+### `Program.cs`
+
 ```c#
-    [Authorize]
-    [HttpGet("{id:guid}")]
-    public async Task<ActionResult<Client>> Get(string id)
-    {
-        return Ok(await ClientRepository.FindByIDAsync(id));
-    }
-
-
-    [Authorize(Roles = "Admin,UsersEdit")]
-    [HttpGet("getuser\{userId}")]
-    public async Task<ActionResult<ApplicationUser>> Get(string userId)
-    {
-        var user = (await GetUsersWithRoles(userId:userId)).First();
-        return Ok(user);
-    }
-
+builder.Services.AddJwtWasmClient();
 ```
 
-On the client-side(if you're using C#/Blazor):
-```c#
-@inject JWTWasmClient AuthClient
+This registers `JwtWasmClient` (login, logout, token refresh, forgot and reset password, with the
+tokens kept in browser local storage), the lower-level `JwtAuthClient` it wraps, and
+`HttpInterceptorService`, which puts a valid bearer token on every outgoing `HttpClient` request
+and refreshes it shortly before it expires. Call `RegisterEvent()` on the interceptor once at
+startup and `DisposeEvent()` when you are done with it.
 
-@code {
- private async Task LoginClick()
- {
-     var response = await AuthClient.Login(new() { Email = userName, Password = password }, ((AuthStateProvider)authStateProvider).NotifyUserAuthentication);
- 
-     if (!string.IsNullOrWhiteSpace(response.Token))
-     {
-         navManager.NavigateTo(@"\");
-         await AppState.LoadCurrentUser(true);
-     }
-     else
-     {
-         Snackbar.Add(new MarkupString("There was an error logging in. Bad login info or internet may be disconnected. Try again later"), Severity.Error);
-     }
- }
+The library does not ship an `AuthenticationStateProvider`; your app keeps its own and passes its
+notify callback in:
+
+```c#
+@inject JwtWasmClient AuthClient
+
+private async Task LoginClick()
+{
+    var result = await AuthClient.Login(new AuthRequest { Email = email, Password = password },
+                                        myAuthStateProvider.NotifyUserAuthentication);
+    if (result.Succeeded)
+    {
+        navManager.NavigateTo("/");
+        return;
+    }
+
+    message = result.Failure switch
+    {
+        AuthFailure.InvalidCredentials => "That email and password don't match.",
+        AuthFailure.ServerError        => "The server had a problem. Try again shortly.",
+        _                              => "Login failed.",
+    };
 }
 ```
 
+`AuthResult` is either tokens or a reason there are none; `Succeeded` tells you which. Network
+failures are not converted into a result and surface as exceptions, so wrap the call if the app can
+be offline.
 
+## Cookies: Blazor Server and MVC (`CPE.DapperIdentity.Cookies.Server`)
 
-##
-
-
-### Blazor Server with Cookie Auth
-In `startup.cs` add the following
 ```c#
-using DapperIdentity.Services;
-using DapperRepository;
+builder.Services.AddDbConnectionInstantiatorForRepositories<MySqlConnection>(connectionString);
+builder.Services.AddDapperIdentityWithCustomCookies(TimeSpan.FromMinutes(30));
 ```
 
-In `ConfigureServices` method, add the following:
+`AddDapperIdentityWithCustomCookies` registers the stores, ASP.NET Core Identity and cookie
+authentication, with the cookie lifetime you pass (sliding by default). No UI is included.
+**Sign-in requires a confirmed email by default**; pass `requireConfirmedEmail: false` if your app
+does not send confirmation mail.
+
+To use Microsoft's Identity UI pages instead, call `AddDapperIdentityWithVanillaUIAndDefaults` and
+scaffold the pages you need. This package does not reference `Microsoft.AspNetCore.Identity.UI` or
+call `AddDefaultUI()`, so the pages are the ones you scaffold. Scaffolding asks for a `DbContext`;
+create an empty one, and delete it afterwards. Then alias the user type at the top of each scaffolded page's `.cshtml.cs` and of
+`_LoginPartial.cshtml`:
+
 ```c#
-var connString = Configuration.GetConnectionString("DefaultConnection");
-services.AddDbConnectionInstantiatorForRepositories<MySqlConnection>(connString);
-
-//To use DEFAULT MS Identity UI Razor Pages Add Vanilla
-//services.AddDapperIdentityWithVanillaUIAndDefaults();
-//or only Identity Middle and Back-End use this:
-services.AddDapperIdentityWithCustomCookies(TimeSpan.FromMinutes(10));//Or however long you want login cookie to last
-
- 
-services.AddScoped<AuthenticationStateProvider, RevalidatingIdentityAuthenticationStateProvider<DapperIdentity.Models.CustomIdentityUser>>();
+using IdentityUser = CPE.DapperIdentity.Stores.Models.CustomIdentityUser;
 ```
 
-## Note on using Microsoft's Default Identity UI
-*Note: In order to scaffold, it requires a DBContext class; create one; it is not used and can be delete after scaffolding.*  
-You **Must** Scaffold out the pages that you want to use and **add** the following to the top of each page's cshtml.cs file:  
-```c#
-using IdentityUser = DapperIdentity.Models.CustomIdentityUser
-```
-
-Also to top of `_Login_Partial.cshtml` add:  
-```c#
-@using IdentityUser = DapperIdentity.Models.CustomIdentityUser
-```
-
-## Alternative Start To Microsoft's Default UI
-Logging in requires an HTTP POST so the cookies can created.
-Here's a simple HTML form section which you can use for logging in which you can put on any page in Blazor:
+`AddIdentityControllers` adds a small `IdentityController` at `/Identity/{action}` for form-post
+login, logout and email confirmation without the default UI. Signing in has to be an HTTP POST
+so the cookie can be set:
 
 ```html
-    <form action="Identity/Login" method="post"><!--cookie-->
-        <input name="name" type="text" />
-        <input name="password" type="password" />
-        <input type="submit" />
-    </form> 
+<form action="Identity/Login" method="post">
+    <input name="name" type="text" />
+    <input name="password" type="password" />
+    <input type="submit" />
+</form>
 ```
 
+## Versioning
 
+Every package in this repo carries the same version, set once in `Directory.Build.props`. The
+0.x line means the API can still change between minor versions; read the release notes before
+upgrading.
 
-To Do:
-* Make a better/generic login razor component. 
-* Handle invalid user/pass. 
-* Add remember me checkbox
-* Handle Email Confirmation(Add Controller Action)
-* NuGet Package
+## License
+
+MIT.
