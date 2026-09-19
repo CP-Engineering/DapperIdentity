@@ -31,7 +31,7 @@ public static class DapperIdentityCookieServiceCollectionExtensions
     /// <returns></returns>
     public static IServiceCollection AddIdentityControllers(this IServiceCollection services)
     {
-        // Routes IdentityController and nothing else from this assembly. Until 2026-09-16 this
+        // Routes IdentityController and nothing else from this assembly. Until 2026-09-15 this
         // method called AddApplicationPart alone, which routes EVERY controller here into the
         // consumer - which is how an unfinished BasicAuthController.Login became a live
         // [AllowAnonymous] endpoint in a production app. The allow-list is the fix; see

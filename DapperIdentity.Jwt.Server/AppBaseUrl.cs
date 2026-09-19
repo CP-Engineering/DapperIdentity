@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Microsoft.Extensions.Configuration;
 
 namespace CPE.DapperIdentity.Jwt.Server;
@@ -9,7 +9,7 @@ namespace CPE.DapperIdentity.Jwt.Server;
 /// <remarks>
 /// <para>
 /// This exists because the address has to come from configuration rather than from the request.
-/// Until 2026-09-18 the password-reset link was built from the incoming <c>Referer</c> header,
+/// Until 2026-09-17 the password-reset link was built from the incoming <c>Referer</c> header,
 /// which an unauthenticated caller sets to anything it likes - so a request to the anonymous
 /// forgot-password endpoint could make the application email a real user a real reset token
 /// pointing at someone else's domain (CWE-640, password-reset poisoning). Deriving it from

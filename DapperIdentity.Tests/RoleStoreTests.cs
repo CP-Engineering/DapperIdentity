@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CPE.DapperIdentity.Stores;
@@ -13,7 +13,7 @@ namespace DapperIdentity.Tests;
 /// Round-trip coverage for <see cref="RoleStore"/>, against the shipped schema.
 /// </summary>
 /// <remarks>
-/// Nine of these eleven members threw <c>NotImplementedException</c> until 2026-09-18, so this is
+/// Nine of these eleven members threw <c>NotImplementedException</c> until 2026-09-17, so this is
 /// first coverage rather than regression coverage. The case that matters most is
 /// <see cref="RoleStore.FindByNameAsync"/>: it compares <c>UPPER(Name)</c> because the table has
 /// no NormalizedName column (D-054), and that decision has to be demonstrated rather than trusted.

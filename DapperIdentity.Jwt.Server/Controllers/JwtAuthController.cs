@@ -162,7 +162,7 @@ public class JwtAuthController : ControllerBase
     /// </para>
     /// <para>
     /// The link is built from the configured <see cref="AppBaseUrl"/> and never from the request:
-    /// until 2026-09-18 it came from the <c>Referer</c> header, which meant an anonymous caller
+    /// until 2026-09-17 it came from the <c>Referer</c> header, which meant an anonymous caller
     /// could choose the domain a real reset token was mailed to.
     /// </para>
     /// </remarks>

@@ -549,7 +549,7 @@ namespace CPE.DapperIdentity.Stores
         /// Deletes the named claims from the user, matching on type and value.
         /// </summary>
         /// <remarks>
-        /// Implemented 2026-09-17. Until then the body built the statement and its parameters and
+        /// Implemented 2026-09-16. Until then the body built the statement and its parameters and
         /// then returned without executing anything, so removing a claim reported success and
         /// changed nothing. The half-written parameters were also wrong: @claimValue was never
         /// supplied and @claimType was bound to the whole claim collection rather than a type.
