@@ -9,7 +9,7 @@
          ProjectReference into a package dependency on the referenced project's Version, so the
          five ids only ever resolve correctly against each other when they move together.
          publish.yml reads this line and refuses to run if the requested version differs. -->
-    <Version>0.9.0</Version>
+    <Version>0.10.0</Version>
 
     <Authors>CPE</Authors>
     <Company>CPE</Company>
