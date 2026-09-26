@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace DapperIdentity.Tests;
 
@@ -24,12 +25,14 @@ public class SignInReportingTests
         return http;
     }
 
+    private const string BobHashed = "sha256:81b637d8fcd2c6da6359e6963113a1170de795e4b725b84d1e0b4cfd9ec58ce9";
+
     [Fact]
     public void A_failure_is_written_as_seven_positional_values()
     {
         var attempt = SignInAttempt.Failure(From("203.0.113.9"), "bob", SignInFailure.BadPassword, "jwt");
 
-        var values = SignInEventFormat.Values(attempt, "203.0.113.9", "BlazorHenemader");
+        var values = SignInEventFormat.Values(attempt, "203.0.113.9", "BlazorHenemader", SignInUserNames.Plain);
 
         Assert.Equal(
             ["Sign-in failed for 'bob' from 203.0.113.9 on BlazorHenemader (jwt): BadPassword.",
@@ -37,16 +40,92 @@ public class SignInReportingTests
             values);
     }
 
-    [Fact]
-    public void A_success_has_no_reason_and_a_missing_username_is_empty()
+    [Theory]
+    [InlineData(SignInUserNames.Hashed)]
+    [InlineData(SignInUserNames.Plain)]
+    public void A_success_never_carries_the_name_or_a_reason(SignInUserNames userNames)
     {
-        var attempt = SignInAttempt.Success(From("203.0.113.9"), null, "cookie");
+        // A success is reported only to protect its address; the customer's name or email is not needed for that.
+        var attempt = SignInAttempt.Success(From("203.0.113.9"), "bob@example.test", "cookie");
 
-        var values = SignInEventFormat.Values(attempt, "203.0.113.9", "App");
+        var values = SignInEventFormat.Values(attempt, "203.0.113.9", "App", userNames);
 
         Assert.Equal("", values[3]);
         Assert.Equal("", values[4]);
+        Assert.DoesNotContain("bob", values[0], StringComparison.Ordinal);
         Assert.StartsWith("Sign-in succeeded", values[0], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void By_default_a_failed_name_is_written_hashed_and_never_in_clear()
+    {
+        var attempt = SignInAttempt.Failure(From("203.0.113.9"), "bob", SignInFailure.BadPassword, "jwt");
+
+        var values = SignInEventFormat.Values(attempt, "203.0.113.9", "App");
+
+        Assert.Equal(BobHashed, values[3]);
+        Assert.All(values, v => Assert.DoesNotContain("'bob'", v, StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("bob")]
+    [InlineData("  BOB ")]
+    [InlineData("Bob\r\n")]
+    public void The_hash_is_of_the_trimmed_lower_cased_name_so_PortGuardian_can_match_its_own(string typed)
+    {
+        // The contract PortGuardian relies on to recognise the owner's names without seeing them: SHA-256 of the
+        // trimmed, lower-cased, cleaned name, lower-case hex, "sha256:" in front.
+        Assert.Equal(BobHashed, SignInEventFormat.Hash(typed));
+    }
+
+    [Fact]
+    public void None_writes_no_name_and_an_empty_name_hashes_to_nothing()
+    {
+        var attempt = SignInAttempt.Failure(From("203.0.113.9"), "bob", SignInFailure.BadPassword, "jwt");
+
+        Assert.Equal("", SignInEventFormat.Values(attempt, "203.0.113.9", "App", SignInUserNames.None)[3]);
+        Assert.Equal("", SignInEventFormat.Hash("   "));
+    }
+
+    [Fact]
+    public void The_name_setting_is_read_from_configuration_and_hashed_without_it()
+    {
+        var configured = new ServiceCollection();
+        configured.AddSingleton<IConfiguration>(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["DapperIdentity:SignInReporting:UserNames"] = "Plain" })
+            .Build());
+        configured.TryAddSignInReporter();
+
+        var bare = new ServiceCollection();
+        bare.TryAddSignInReporter();
+
+        Assert.Equal(SignInUserNames.Plain, configured.BuildServiceProvider().GetRequiredService<IOptions<SignInReportingOptions>>().Value.UserNames);
+        Assert.Equal(SignInUserNames.Hashed, bare.BuildServiceProvider().GetRequiredService<IOptions<SignInReportingOptions>>().Value.UserNames);
+    }
+
+    [Fact]
+    public void A_username_holding_line_breaks_cannot_forge_a_second_log_entry()
+    {
+        const string forged = "bob\r\n2026-09-26 12:00:00 Sign-in succeeded for admin";
+        var logs = new CapturingLogs();
+        var written = new List<string[]>();
+        var reporter = Reporter(logs, (_, _, values) => written.Add(values), SignInUserNames.Plain);
+
+        reporter.Report(SignInAttempt.Failure(From("203.0.113.9"), forged, SignInFailure.UnknownUser, "jwt"));
+
+        var message = Assert.Single(logs.Entries).Message;
+        Assert.DoesNotContain('\n', message);
+        Assert.DoesNotContain('\r', message);
+        Assert.All(Assert.Single(written), v => Assert.DoesNotContain('\n', v));
+        Assert.Equal("bob2026-09-26 12:00:00 Sign-in succeeded for admin", written[0][3]);
+    }
+
+    [Fact]
+    public void A_username_is_cut_to_a_length_a_log_can_hold_and_control_characters_go()
+    {
+        Assert.Equal(SignInEventFormat.MaxUserNameLength, SignInEventFormat.Clean(new string('a', 10_000)).Length);
+        Assert.Equal("ab", SignInEventFormat.Clean("a\u0000\tb"));
+        Assert.Equal("", SignInEventFormat.Clean(null));
     }
 
     [Fact]
@@ -128,7 +207,8 @@ public class SignInReportingTests
         var entry = Assert.Single(logs.Entries);
         Assert.Equal(("CPE.DapperIdentity.SignIn", LogLevel.Information, 1000), (entry.Category, entry.Level, entry.EventId.Id));
         Assert.Contains("203.0.113.9", entry.Message, StringComparison.Ordinal);
-        Assert.Contains("bob", entry.Message, StringComparison.Ordinal);
+        Assert.Contains(BobHashed, entry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("bob ", entry.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -205,8 +285,8 @@ public class SignInReportingTests
         Assert.Contains(services, d => d.ServiceType == typeof(ISignInReporter));
     }
 
-    private static SignInReporter Reporter(CapturingLogs logs, Action<int, bool, string[]> writeEvent) =>
-        new(new TestHost(), logs, writeEvent);
+    private static SignInReporter Reporter(CapturingLogs logs, Action<int, bool, string[]> writeEvent, SignInUserNames userNames = SignInUserNames.Hashed) =>
+        new(new TestHost(), logs, Options.Create(new SignInReportingOptions { UserNames = userNames }), writeEvent);
 
     internal static IConfiguration JwtConfig() => new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
     {

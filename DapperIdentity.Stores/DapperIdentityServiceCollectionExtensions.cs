@@ -4,6 +4,7 @@ using DapperRepository;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 
 using IdentityRole = CPE.DapperIdentity.Stores.Models.CustomIdentityRole;
 using IdentityUser = CPE.DapperIdentity.Stores.Models.CustomIdentityUser;
@@ -59,6 +60,9 @@ public static class DapperIdentityServiceCollectionExtensions
     /// </remarks>
     public static IServiceCollection TryAddSignInReporter(this IServiceCollection services)
     {
+        // Names are hashed unless DapperIdentity:SignInReporting:UserNames (or a Configure call) says otherwise.
+        services.AddOptions<SignInReportingOptions>();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IConfigureOptions<SignInReportingOptions>, SignInReportingOptionsFromConfiguration>());
         services.TryAddSingleton<ISignInReporter, SignInReporter>();
         return services;
     }

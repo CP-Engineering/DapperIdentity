@@ -1,10 +1,15 @@
 using System.Diagnostics;
 using System.Net;
 using System.Runtime.Versioning;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace CPE.DapperIdentity.Stores.SignIn;
 
@@ -65,6 +70,47 @@ public sealed record SignInAttempt(bool Succeeded, IPAddress? ClientIp, string? 
     }
 }
 
+/// <summary>How the name typed at a failed sign-in is written. A successful sign-in never carries one.</summary>
+public enum SignInUserNames
+{
+    /// <summary>
+    /// <c>sha256:</c> and the hash of the trimmed, lower-cased name. Enough for PortGuardian to recognise the owner's own
+    /// names (it hashes its configured names the same way) without writing anyone's name or email in clear. Pseudonymous,
+    /// not anonymous: whoever already holds a list of names can hash them and look for a match.
+    /// </summary>
+    Hashed,
+
+    /// <summary>The name as typed (cleaned of line breaks and control characters). The most useful, and personal data.</summary>
+    Plain,
+
+    /// <summary>No name at all. Bans still work - they go by address - but nothing shows which accounts are attacked.</summary>
+    None,
+}
+
+/// <summary>
+/// Settings for sign-in reporting, bound from <c>DapperIdentity:SignInReporting</c> in configuration, or set in code with
+/// <c>services.Configure&lt;SignInReportingOptions&gt;(...)</c>.
+/// </summary>
+/// <example><code>"DapperIdentity": { "SignInReporting": { "UserNames": "Plain" } }</code></example>
+public sealed class SignInReportingOptions
+{
+    /// <summary>The configuration section these are read from.</summary>
+    public const string SectionName = "DapperIdentity:SignInReporting";
+
+    /// <summary>How the name typed at a failed sign-in is written; <see cref="SignInUserNames.Hashed"/> unless set.</summary>
+    public SignInUserNames UserNames { get; set; } = SignInUserNames.Hashed;
+}
+
+/// <summary>
+/// Binds <see cref="SignInReportingOptions"/> from configuration when the host has any; a host without configuration
+/// (a test, a console tool) keeps the defaults instead of failing to start.
+/// </summary>
+internal sealed class SignInReportingOptionsFromConfiguration(IServiceProvider services) : IConfigureOptions<SignInReportingOptions>
+{
+    public void Configure(SignInReportingOptions options) =>
+        services.GetService<IConfiguration>()?.GetSection(SignInReportingOptions.SectionName).Bind(options);
+}
+
 /// <summary>
 /// Tells something outside the app that a sign-in happened. The default logs it and, on Windows,
 /// writes it to the event log for PortGuardian; register your own first to feed something else.
@@ -92,15 +138,69 @@ public static class SignInEventFormat
     /// <summary>The format version, written as value [1].</summary>
     public const string Version = "1";
 
-    /// <summary>[0] a sentence for Event Viewer, [1] version, [2] IP, [3] username as typed, [4] reason (empty on success), [5] app, [6] path.</summary>
-    public static string[] Values(SignInAttempt attempt, string ip, string appName)
+    /// <summary>The longest username written; anything past it is an attack on the log, not a name.</summary>
+    public const int MaxUserNameLength = 256;
+
+    /// <summary>The prefix of a hashed name, so a reader can tell it from a name that happens to look like hex.</summary>
+    public const string HashPrefix = "sha256:";
+
+    /// <summary>
+    /// [0] a sentence for Event Viewer, [1] version, [2] IP, [3] the name as <paramref name="userNames"/> says (empty on
+    /// success), [4] reason (empty on success), [5] app, [6] path.
+    /// </summary>
+    public static string[] Values(SignInAttempt attempt, string ip, string appName, SignInUserNames userNames = SignInUserNames.Hashed)
     {
         ArgumentNullException.ThrowIfNull(attempt);
-        var user = attempt.UserName ?? "";
+        var user = UserNameFor(attempt, userNames);
         var sentence = attempt.Succeeded
             ? $"Sign-in succeeded for '{user}' from {ip} on {appName} ({attempt.Path})."
             : $"Sign-in failed for '{user}' from {ip} on {appName} ({attempt.Path}): {attempt.Reason}.";
         return [sentence, Version, ip, user, attempt.Succeeded ? "" : attempt.Reason.ToString(), appName, attempt.Path];
+    }
+
+    /// <summary>
+    /// The name to write for <paramref name="attempt"/>: nothing for a success (the address is all it is reported for),
+    /// otherwise the typed name hashed, plain or left out.
+    /// </summary>
+    public static string UserNameFor(SignInAttempt attempt, SignInUserNames userNames)
+    {
+        ArgumentNullException.ThrowIfNull(attempt);
+        if (attempt.Succeeded || userNames == SignInUserNames.None)
+            return "";
+
+        var clean = Clean(attempt.UserName);
+        return userNames == SignInUserNames.Plain ? clean : Hash(clean);
+    }
+
+    /// <summary>
+    /// <see cref="HashPrefix"/> and the SHA-256 of the trimmed, lower-cased name, in lower-case hex; empty for no name.
+    /// PortGuardian computes the same for its owner names, so this is a contract: the normalisation must not change
+    /// without a new <see cref="Version"/>.
+    /// </summary>
+    public static string Hash(string? userName)
+    {
+        var normalised = Clean(userName).Trim().ToLowerInvariant();
+        if (normalised.Length == 0)
+            return "";
+
+        return HashPrefix + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalised))).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// A username as typed, made safe to write into a log: line breaks and other control characters removed, and cut
+    /// to <see cref="MaxUserNameLength"/>. It is the one value an attacker chooses freely, so without this a "name"
+    /// holding a line break could forge a second log entry, and a megabyte one could fill the log.
+    /// </summary>
+    public static string Clean(string? userName)
+    {
+        if (string.IsNullOrEmpty(userName))
+            return "";
+
+        // The newline replacements first and explicitly: they are what log readers and scanners (CodeQL's log-forging
+        // rule) look for; the pass after catches every other control character.
+        var withoutBreaks = userName.Replace("\r", "", StringComparison.Ordinal).Replace("\n", "", StringComparison.Ordinal);
+        var cleaned = new string(withoutBreaks.Where(c => !char.IsControl(c)).ToArray());
+        return cleaned.Length <= MaxUserNameLength ? cleaned : cleaned[..MaxUserNameLength];
     }
 }
 
@@ -112,26 +212,31 @@ public sealed class SignInReporter : ISignInReporter
 {
     private readonly string _appName;
     private readonly ILogger _logger;
+    private readonly SignInUserNames _userNames;
     private readonly Action<int, bool, string[]>? _writeEvent;
     private volatile bool _eventLogOff;
 
-    /// <summary>Reports under the host's application name.</summary>
+    /// <summary>Reports under the host's application name, writing names as <paramref name="options"/> says.</summary>
     /// <param name="host">Supplies the application name written with each event.</param>
     /// <param name="loggers">Creates the <see cref="SignInEventFormat.LogCategory"/> logger.</param>
-    public SignInReporter(IHostEnvironment host, ILoggerFactory loggers)
-        : this(host, loggers, null)
+    /// <param name="options">How names are written (<see cref="SignInReportingOptions.SectionName"/>).</param>
+    public SignInReporter(IHostEnvironment host, ILoggerFactory loggers, IOptions<SignInReportingOptions> options)
+        : this(host, loggers, options, null)
     {
     }
 
     /// <param name="host">Supplies the application name written with each event.</param>
     /// <param name="loggers">Creates the <see cref="SignInEventFormat.LogCategory"/> logger.</param>
+    /// <param name="options">How names are written.</param>
     /// <param name="writeEvent">Replaces the event-log write (tests): event id, whether it is a warning, the values. Null writes to the real event log.</param>
-    internal SignInReporter(IHostEnvironment host, ILoggerFactory loggers, Action<int, bool, string[]>? writeEvent)
+    internal SignInReporter(IHostEnvironment host, ILoggerFactory loggers, IOptions<SignInReportingOptions> options, Action<int, bool, string[]>? writeEvent)
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(loggers);
+        ArgumentNullException.ThrowIfNull(options);
         _appName = host.ApplicationName;
         _logger = loggers.CreateLogger(SignInEventFormat.LogCategory);
+        _userNames = options.Value.UserNames;
         _writeEvent = writeEvent;
     }
 
@@ -149,7 +254,7 @@ public sealed class SignInReporter : ISignInReporter
             new EventId(attempt.Succeeded ? SignInEventFormat.SucceededId : SignInEventFormat.FailedId,
                         attempt.Succeeded ? "SignInSucceeded" : "SignInFailed"),
             "Sign-in {Outcome} for {UserName} from {ClientIp} on {App} via {Path} ({Reason})",
-            attempt.Succeeded ? "succeeded" : "failed", attempt.UserName, attempt.ClientIp, _appName, attempt.Path,
+            attempt.Succeeded ? "succeeded" : "failed", SignInEventFormat.UserNameFor(attempt, _userNames), attempt.ClientIp, _appName, attempt.Path,
             attempt.Succeeded ? "-" : attempt.Reason.ToString());
 
         // No address, nothing to ban: PortGuardian has no use for the event.
@@ -165,7 +270,7 @@ public sealed class SignInReporter : ISignInReporter
     {
         var id = attempt.Succeeded ? SignInEventFormat.SucceededId : SignInEventFormat.FailedId;
         var warning = !attempt.Succeeded;
-        var values = SignInEventFormat.Values(attempt, ip, _appName);
+        var values = SignInEventFormat.Values(attempt, ip, _appName, _userNames);
         try
         {
             if (_writeEvent is not null)
