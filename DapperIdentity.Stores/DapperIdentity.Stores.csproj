@@ -43,6 +43,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The sign-in reporter's event-log write is swapped out in tests through an internal constructor. -->
+    <InternalsVisibleTo Include="DapperIdentity.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- ICustomIdentityUser and IAuthEmailSender live in Abstractions: they are contracts a
          consumer implements, so they must be reachable without taking the Dapper stack. -->
     <ProjectReference Include="..\DapperIdentity.Abstractions\DapperIdentity.Abstractions.csproj" />
