@@ -1,8 +1,10 @@
 using CPE.DapperIdentity.Stores;
+using CPE.DapperIdentity.Stores.SignIn;
 using DapperRepository;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 
 using IdentityRole = CPE.DapperIdentity.Stores.Models.CustomIdentityRole;
 using IdentityUser = CPE.DapperIdentity.Stores.Models.CustomIdentityUser;
@@ -45,6 +47,23 @@ public static class DapperIdentityServiceCollectionExtensions
         // but it is the same Dapper-backed implementation behind it.
         services.TryAddTransient<IUserClaimStore<IdentityUser>, UserStore>();
 
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the default <see cref="ISignInReporter"/>: a log line on every OS, and on Windows an
+    /// Application-log event PortGuardian reads to ban an address that keeps failing.
+    /// </summary>
+    /// <remarks>
+    /// Called by every sign-in set-up in these packages. TryAdd, so a host that registered its own
+    /// reporter first (to feed another tool, or to report nothing) keeps it.
+    /// </remarks>
+    public static IServiceCollection TryAddSignInReporter(this IServiceCollection services)
+    {
+        // Names are hashed unless DapperIdentity:SignInReporting:UserNames (or a Configure call) says otherwise.
+        services.AddOptions<SignInReportingOptions>();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IConfigureOptions<SignInReportingOptions>, SignInReportingOptionsFromConfiguration>());
+        services.TryAddSingleton<ISignInReporter, SignInReporter>();
         return services;
     }
 }

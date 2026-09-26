@@ -1,4 +1,5 @@
-﻿using CPE.DapperIdentity.Stores.Models;
+﻿using CPE.DapperIdentity.Stores;
+using CPE.DapperIdentity.Stores.Models;
 using CPE.DapperIdentity.Abstractions.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -50,6 +51,8 @@ public class JwtAuthController : ControllerBase
 
     private readonly IOptions<DataProtectionTokenProviderOptions> _TokenOptions;
 
+    private readonly CustomSignInManager _SignInManager;
+
     /// <summary>Captures the services the endpoints need.</summary>
     /// <param name="userManager">Identity's user manager.</param>
     /// <param name="tokenService">Issues access and refresh tokens.</param>
@@ -64,6 +67,10 @@ public class JwtAuthController : ControllerBase
     /// The token provider's settings, read for the link lifetime quoted in emails - the value the
     /// server actually enforces, however it was set.
     /// </param>
+    /// <param name="signInManager">
+    /// Checks a sign-in the way the cookie sign-in does (enabled, confirmed, not locked out, then the
+    /// password) and reports it.
+    /// </param>
     public JwtAuthController(UserManager<IdentityUser> userManager,
                              TokenService tokenService,
                              IAuthEmailSender emailSender,
@@ -71,7 +78,8 @@ public class JwtAuthController : ControllerBase
                              IAppSettings appSettings,
                              AppBaseUrl appBaseUrl,
                              PasswordResetRateLimiter resetRateLimiter,
-                             IOptions<DataProtectionTokenProviderOptions> tokenOptions)//Todo: Add options, IOptions<JWTControllerOptions> options) //ApplicationDbContext context
+                             IOptions<DataProtectionTokenProviderOptions> tokenOptions,
+                             CustomSignInManager signInManager)//Todo: Add options, IOptions<JWTControllerOptions> options) //ApplicationDbContext context
     {
         _TokenOptions = tokenOptions;
         _userManager = userManager;
@@ -82,6 +90,7 @@ public class JwtAuthController : ControllerBase
         _AppSettings = appSettings;
         _AppBaseUrl = appBaseUrl;
         _ResetRateLimiter = resetRateLimiter;
+        _SignInManager = signInManager;
     }
 
     /// <summary>
@@ -339,14 +348,11 @@ public class JwtAuthController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var managedUser = await _userManager.FindByEmailAsync(request.Email!);
+        // Through the sign-in manager, not UserManager.CheckPasswordAsync: that checks only the
+        // password hash, so a disabled, unconfirmed or locked-out user used to get a token. Every
+        // refusal answers alike, so the reply does not say which accounts exist or are disabled.
+        var (_, managedUser) = await _SignInManager.CheckPasswordByEmailAsync(request.Email!, request.Password!);
         if (managedUser == null)
-        {
-            return BadRequest("Bad credentials");
-        }
-
-        var isPasswordValid = await _userManager.CheckPasswordAsync(managedUser, request.Password!);
-        if (!isPasswordValid)
         {
             return BadRequest("Bad credentials");
         }
@@ -414,6 +420,11 @@ public class JwtAuthController : ControllerBase
         var username = principal.Identity!.Name; //do we need to null check on Identity?
         var user = await _userManager.FindByNameAsync(username);// EmailAsync(username);
         if (user == null || user.RefreshToken != tokenDto.RefreshToken || user.RefreshTokenExpireTime <= DateTime.Now)
+            return BadRequest("Invalid access token or refresh token");
+
+        // A refresh has no password to check, so without this a user disabled or locked out after
+        // signing in would keep renewing tokens for as long as they kept refreshing.
+        if (!await _SignInManager.AllowsSignInAsync(user))
             return BadRequest("Invalid access token or refresh token");//return BadRequest(new AuthResponseDto { IsAuthSuccessful = false, ErrorMessage = "Invalid client request" });
 
         var roles = await _userManager.GetRolesAsync(user);

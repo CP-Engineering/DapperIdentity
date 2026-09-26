@@ -88,6 +88,7 @@ public static class ServiceCollectionExtensions
                 .ValidateOnStart();
 
         services.TryAddDapperIdentityDatabaseStores();
+        services.TryAddSignInReporter(); // JwtAuthController reports each sign-in.
         services.AddScoped<TokenService>();
         // Route JwtAuthController and nothing else from this assembly. Adding the AssemblyPart on
         // its own would hand the consumer every controller this library happens to contain, now

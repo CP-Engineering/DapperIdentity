@@ -89,6 +89,7 @@ public static class DapperIdentityCookieServiceCollectionExtensions
     {
 
         services.TryAddDapperIdentityDatabaseStores();
+        services.TryAddSignInReporter(); // CustomSignInManager reports each sign-in.
         services.AddIdentity<IdentityUser, IdentityRole>()
             .AddDefaultTokenProviders()
             .AddSignInManager<CustomSignInManager>()
@@ -151,9 +152,13 @@ public static class DapperIdentityCookieServiceCollectionExtensions
                                                             bool slidingExpiration = true)
     {
         services.TryAddDapperIdentityDatabaseStores();
+        services.TryAddSignInReporter(); // CustomSignInManager reports each sign-in.
 
+        // CustomSignInManager here too: without it the IsEnabled column is ignored and sign-ins
+        // through the Identity UI pages are not reported.
         services.AddIdentity<IdentityUser, IdentityRole>()
             //.AddDefaultUI()
+            .AddSignInManager<CustomSignInManager>()
             .AddDefaultTokenProviders();
 
         services.Configure<IdentityOptions>(opts =>
