@@ -1,5 +1,12 @@
 # CPE.DapperIdentity
 
+[![CI](https://github.com/CP-Engineering/DapperIdentity/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/CP-Engineering/DapperIdentity/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/CP-Engineering/DapperIdentity/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/CP-Engineering/DapperIdentity/actions/workflows/codeql.yml)
+[![NuGet](https://img.shields.io/nuget/v/CPE.DapperIdentity.Stores?label=nuget)](https://www.nuget.org/packages?q=CPE.DapperIdentity)
+[![NuGet downloads](https://img.shields.io/nuget/dt/CPE.DapperIdentity.Stores?label=downloads)](https://www.nuget.org/packages/CPE.DapperIdentity.Stores)
+![.NET 8 | 10](https://img.shields.io/badge/.NET-8.0%20%7C%2010.0-512BD4)
+[![License: MIT](https://img.shields.io/github/license/CP-Engineering/DapperIdentity)](LICENSE)
+
 ASP.NET Core Identity with the user and role stores backed by **Dapper** instead of Entity
 Framework. Identity's own logic is unchanged; only the way it reads and writes the database is.
 
@@ -11,13 +18,13 @@ The stores use the generic repository from
 Five packages, one per dependency profile, always released together at the same version.
 Install only the ones your project needs; each pulls in what it depends on.
 
-| Package | Use it in | Brings in |
-|---|---|---|
-| `CPE.DapperIdentity.Jwt.Server` | An ASP.NET Core API issuing JWTs | Stores, Abstractions, JwtBearer |
-| `CPE.DapperIdentity.Jwt.Client` | A Blazor WebAssembly app calling that API | Abstractions, Blazored.LocalStorage |
-| `CPE.DapperIdentity.Cookies.Server` | A Blazor Server / MVC app on cookie auth | Stores, Abstractions |
-| `CPE.DapperIdentity.Stores` | Anything that only needs the Dapper stores | Abstractions, Dapper |
-| `CPE.DapperIdentity.Abstractions` | Shared contracts and wire models | nothing |
+| Package | NuGet | Use it in | Brings in |
+|---|---|---|---|
+| `CPE.DapperIdentity.Jwt.Server` | [![NuGet](https://img.shields.io/nuget/v/CPE.DapperIdentity.Jwt.Server?label=)](https://www.nuget.org/packages/CPE.DapperIdentity.Jwt.Server) | An ASP.NET Core API issuing JWTs | Stores, Abstractions, JwtBearer |
+| `CPE.DapperIdentity.Jwt.Client` | [![NuGet](https://img.shields.io/nuget/v/CPE.DapperIdentity.Jwt.Client?label=)](https://www.nuget.org/packages/CPE.DapperIdentity.Jwt.Client) | A Blazor WebAssembly app calling that API | Abstractions, Blazored.LocalStorage |
+| `CPE.DapperIdentity.Cookies.Server` | [![NuGet](https://img.shields.io/nuget/v/CPE.DapperIdentity.Cookies.Server?label=)](https://www.nuget.org/packages/CPE.DapperIdentity.Cookies.Server) | A Blazor Server / MVC app on cookie auth | Stores, Abstractions |
+| `CPE.DapperIdentity.Stores` | [![NuGet](https://img.shields.io/nuget/v/CPE.DapperIdentity.Stores?label=)](https://www.nuget.org/packages/CPE.DapperIdentity.Stores) | Anything that only needs the Dapper stores | Abstractions, Dapper |
+| `CPE.DapperIdentity.Abstractions` | [![NuGet](https://img.shields.io/nuget/v/CPE.DapperIdentity.Abstractions?label=)](https://www.nuget.org/packages/CPE.DapperIdentity.Abstractions) | Shared contracts and wire models | nothing |
 
 All five target `net8.0` and `net10.0`. Namespaces match the package ids
 (`CPE.DapperIdentity.Stores`, `CPE.DapperIdentity.Jwt.Client`, ...). The `Add...` registration
