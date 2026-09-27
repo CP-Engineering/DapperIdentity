@@ -212,6 +212,21 @@ public class SignInReportingTests
     }
 
     [Fact]
+    public void A_success_is_logged_without_an_empty_name_or_reason()
+    {
+        var logs = new CapturingLogs();
+        var written = new List<string[]>();
+        var reporter = Reporter(logs, (_, _, values) => written.Add(values));
+
+        reporter.Report(SignInAttempt.Success(From("203.0.113.9"), "bob", "cookie"));
+
+        var entry = Assert.Single(logs.Entries);
+        Assert.Equal((LogLevel.Information, 1001), (entry.Level, entry.EventId.Id));
+        Assert.Equal("Sign-in succeeded from 203.0.113.9 on TestApp via cookie", entry.Message);
+        Assert.Equal("Sign-in succeeded from 203.0.113.9 on TestApp (cookie).", Assert.Single(written)[0]);
+    }
+
+    [Fact]
     public void An_attempt_without_an_address_is_logged_but_not_written_as_an_event()
     {
         var logs = new CapturingLogs();

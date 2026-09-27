@@ -152,8 +152,9 @@ public static class SignInEventFormat
     {
         ArgumentNullException.ThrowIfNull(attempt);
         var user = UserNameFor(attempt, userNames);
+        // A success carries no name, so its sentence names none - "for ''" read like a bug.
         var sentence = attempt.Succeeded
-            ? $"Sign-in succeeded for '{user}' from {ip} on {appName} ({attempt.Path})."
+            ? $"Sign-in succeeded from {ip} on {appName} ({attempt.Path})."
             : $"Sign-in failed for '{user}' from {ip} on {appName} ({attempt.Path}): {attempt.Reason}.";
         return [sentence, Version, ip, user, attempt.Succeeded ? "" : attempt.Reason.ToString(), appName, attempt.Path];
     }
@@ -250,12 +251,22 @@ public sealed class SignInReporter : ISignInReporter
 
         // Information, not Warning: on Windows ASP.NET Core's default event-log logger takes Warning and
         // up, so a Warning here would add a second Application-log entry per attempt during an attack.
-        _logger.LogInformation(
-            new EventId(attempt.Succeeded ? SignInEventFormat.SucceededId : SignInEventFormat.FailedId,
-                        attempt.Succeeded ? "SignInSucceeded" : "SignInFailed"),
-            "Sign-in {Outcome} for {UserName} from {ClientIp} on {App} via {Path} ({Reason})",
-            attempt.Succeeded ? "succeeded" : "failed", SignInEventFormat.UserNameFor(attempt, _userNames), attempt.ClientIp, _appName, attempt.Path,
-            attempt.Succeeded ? "-" : attempt.Reason.ToString());
+        // Two templates, not one with blanks: a success has no name or reason to show, and an empty "for  from" or a
+        // "(-)" in the log reads like something failed to fill in. The shared properties keep the same names.
+        if (attempt.Succeeded)
+        {
+            _logger.LogInformation(
+                new EventId(SignInEventFormat.SucceededId, "SignInSucceeded"),
+                "Sign-in succeeded from {ClientIp} on {App} via {Path}",
+                attempt.ClientIp, _appName, attempt.Path);
+        }
+        else
+        {
+            _logger.LogInformation(
+                new EventId(SignInEventFormat.FailedId, "SignInFailed"),
+                "Sign-in failed for {UserName} from {ClientIp} on {App} via {Path} ({Reason})",
+                SignInEventFormat.UserNameFor(attempt, _userNames), attempt.ClientIp, _appName, attempt.Path, attempt.Reason.ToString());
+        }
 
         // No address, nothing to ban: PortGuardian has no use for the event.
         if (_eventLogOff || attempt.ClientIp is null)

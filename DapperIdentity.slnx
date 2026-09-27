@@ -1,0 +1,13 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="DapperIdentity.Abstractions/DapperIdentity.Abstractions.csproj" />
+  <Project Path="DapperIdentity.Cookies.Server/DapperIdentity.Cookies.Server.csproj" />
+  <Project Path="DapperIdentity.Jwt.Client/DapperIdentity.Jwt.Client.csproj" />
+  <Project Path="DapperIdentity.Jwt.Server/DapperIdentity.Jwt.Server.csproj" />
+  <Project Path="DapperIdentity.Stores/DapperIdentity.Stores.csproj" />
+  <Project Path="DapperIdentity.Tests/DapperIdentity.Tests.csproj" />
+</Solution>
