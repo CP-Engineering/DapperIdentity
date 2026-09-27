@@ -40,7 +40,7 @@ jobs:
       # Autobuild guesses, and guesses badly on a multi-targeted library that needs two SDKs.
       # Build it explicitly instead.
       - name: Build
-        run: dotnet build DapperIdentity.sln -c Release
+        run: dotnet build DapperIdentity.slnx -c Release
 
       - name: Analyze
         uses: github/codeql-action/analyze@v4

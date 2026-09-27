@@ -70,16 +70,16 @@ jobs:
           done
 
       - name: Restore
-        run: dotnet restore DapperIdentity.sln
+        run: dotnet restore DapperIdentity.slnx
 
       - name: Build
-        run: dotnet build DapperIdentity.sln -c Release --no-restore
+        run: dotnet build DapperIdentity.slnx -c Release --no-restore
 
       - name: Test
-        run: dotnet test DapperIdentity.sln -c Release --no-build
+        run: dotnet test DapperIdentity.slnx -c Release --no-build
 
       - name: Pack
-        run: dotnet pack DapperIdentity.sln -c Release --no-build -o artifacts
+        run: dotnet pack DapperIdentity.slnx -c Release --no-build -o artifacts
 
       - name: Verify package set, contents and inter-package dependencies
         shell: bash

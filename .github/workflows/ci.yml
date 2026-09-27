@@ -26,16 +26,16 @@ jobs:
             10.0.x
 
       - name: Restore
-        run: dotnet restore DapperIdentity.sln
+        run: dotnet restore DapperIdentity.slnx
 
       - name: Build
-        run: dotnet build DapperIdentity.sln -c Release --no-restore
+        run: dotnet build DapperIdentity.slnx -c Release --no-restore
 
       - name: Test
-        run: dotnet test DapperIdentity.sln -c Release --no-build --verbosity normal
+        run: dotnet test DapperIdentity.slnx -c Release --no-build --verbosity normal
 
       - name: Pack
-        run: dotnet pack DapperIdentity.sln -c Release --no-build -o artifacts
+        run: dotnet pack DapperIdentity.slnx -c Release --no-build -o artifacts
 
       # The five packages only work as a set: packing turns each ProjectReference into a dependency
       # on the referenced project's PackageId at its Version. A project that lost its PackageId or
