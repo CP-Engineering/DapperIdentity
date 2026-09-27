@@ -5,7 +5,7 @@
 [![NuGet](https://img.shields.io/nuget/v/CPE.DapperIdentity.Stores?label=nuget)](https://www.nuget.org/packages?q=CPE.DapperIdentity)
 [![NuGet downloads](https://img.shields.io/nuget/dt/CPE.DapperIdentity.Stores?label=downloads)](https://www.nuget.org/packages/CPE.DapperIdentity.Stores)
 ![.NET 8 | 10](https://img.shields.io/badge/.NET-8.0%20%7C%2010.0-512BD4)
-[![License: MIT](https://img.shields.io/github/license/CP-Engineering/DapperIdentity)](LICENSE)
+[![License: MIT](https://img.shields.io/github/license/CP-Engineering/DapperIdentity)](https://github.com/CP-Engineering/DapperIdentity/blob/main/LICENSE)
 
 ASP.NET Core Identity with the user and role stores backed by **Dapper** instead of Entity
 Framework. Identity's own logic is unchanged; only the way it reads and writes the database is.
@@ -207,6 +207,67 @@ so the cookie can be set:
     <input type="submit" />
 </form>
 ```
+
+## Sign-in reporting
+
+Every sign-in through `CustomSignInManager` is reported: cookie sign-ins (`PasswordSignInAsync`,
+which `IdentityController` and scaffolded Identity pages call) and JWT sign-ins
+(`JwtAuthController`, through `CheckPasswordByEmailAsync`). Nothing to switch on; each set-up
+method registers the default reporter.
+
+Each report is written twice:
+
+- **A log line** on every OS, category `CPE.DapperIdentity.SignIn`, at `Information`, event id
+  1000 (failed) or 1001 (succeeded). It lands wherever your app's logging already goes.
+- **A Windows event** in the Application log under the source `PortGuardian.SignIn`, for tools
+  that ban an address after repeated failures (PortGuardian reads it). An app cannot create that
+  source itself; PortGuardian's installer registers it, or run once, elevated:
+  `New-EventLog -LogName Application -Source PortGuardian.SignIn`. Without it the app logs one
+  warning and carries on writing the log line only. Not written on other operating systems.
+
+Reporting never breaks a sign-in: a failure to write is logged and swallowed.
+
+### What name is written
+
+The name typed at a **failed** sign-in is the only personal data in a report; a successful sign-in
+never carries a name, only the address it came from. Choose how the failed name is written in
+`appsettings.json`:
+
+```json
+"DapperIdentity": {
+  "SignInReporting": { "UserNames": "Hashed" }
+}
+```
+
+| `UserNames` | Written | Use when |
+|---|---|---|
+| `Hashed` (default) | `sha256:` + the SHA-256 of the trimmed, lower-cased name | You want to see repeated attempts on one account, and let a ban tool recognise your own names, without writing names in clear |
+| `Plain` | The name as typed | You want to read which accounts are being attacked, and your logs are yours to keep |
+| `None` | Nothing | You want no name at all; bans still work, since they go by address |
+
+Or in code, after the set-up call (a later `Configure` wins over configuration):
+
+```c#
+using CPE.DapperIdentity.Stores.SignIn;
+
+builder.Services.Configure<SignInReportingOptions>(o => o.UserNames = SignInUserNames.None);
+```
+
+Either way the name is cleaned first: line breaks and other control characters are removed and it
+is cut to 256 characters, so a typed "name" cannot forge a log entry or flood the log. A hashed
+name is pseudonymous, not anonymous: anyone who already holds a list of names or emails can hash
+them and look for a match.
+
+To send reports somewhere else, register your own `ISignInReporter` before the set-up call; the
+library only adds its default when none is registered.
+
+### Who can sign in
+
+A JWT sign-in and a token refresh apply the same checks as a cookie sign-in: a user with
+`IsEnabled = false` (or an unconfirmed email, where confirmation is required) gets no token, and
+an existing refresh token stops working once the user is disabled. A refused sign-in answers
+`400 Bad credentials`, the same as a wrong password, and a refused refresh answers the same as an
+invalid refresh token, so neither reveals which accounts exist or are disabled.
 
 ## Versioning
 
